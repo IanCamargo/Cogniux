@@ -1,0 +1,105 @@
+{
+  "entities": {
+    "Exam": {
+      "title": "Exam",
+      "description": "Definition of an exam created by a professor",
+      "type": "object",
+      "properties": {
+        "subject": { "type": "string" },
+        "semester": { "type": "string" },
+        "course": { "type": "string" },
+        "className": { "type": "string" },
+        "unit": { "type": "string" },
+        "numQuestions": { "type": "number" },
+        "alternativesPerQuestion": { "type": "number" },
+        "answerKey": { "type": "array", "items": { "type": "string" } },
+        "questions": { 
+          "type": "array", 
+          "items": { 
+            "type": "object",
+            "properties": {
+              "text": { "type": "string" },
+              "options": { "type": "array", "items": { "type": "string" } },
+              "correctAnswer": { "type": "string" }
+            }
+          }
+        },
+        "isOnline": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "professorId": { "type": "string" }
+      },
+      "required": ["subject", "semester", "numQuestions", "alternativesPerQuestion", "answerKey", "createdAt", "professorId"]
+    },
+    "Student": {
+      "title": "Student",
+      "description": "A student enrolled in an exam",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "registrationId": { "type": "string" }
+      },
+      "required": ["name"]
+    },
+    "Submission": {
+      "title": "Submission",
+      "description": "A student's answer sheet submission",
+      "type": "object",
+      "properties": {
+        "examId": { "type": "string" },
+        "studentName": { "type": "string" },
+        "answers": { "type": "array", "items": { "type": "string" } },
+        "score": { "type": "number" },
+        "gradedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["examId", "studentName", "answers", "score", "gradedAt"]
+    },
+    "PedagogicalPlan": {
+      "title": "PedagogicalPlan",
+      "description": "AI-generated analysis and action plan for a class",
+      "type": "object",
+      "properties": {
+        "examId": { "type": "string" },
+        "analysis": { "type": "string" },
+        "recommendations": { "type": "array", "items": { "type": "string" } },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["examId", "analysis", "recommendations", "createdAt"]
+    },
+    "AccessToken": {
+      "title": "AccessToken",
+      "description": "A unique access token for a student to enter an exam",
+      "type": "object",
+      "properties": {
+        "token": { "type": "string" },
+        "examId": { "type": "string" },
+        "studentId": { "type": "string" },
+        "studentName": { "type": "string" },
+        "isUsed": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["token", "examId", "isUsed", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/exams/{examId}": {
+      "schema": "Exam",
+      "description": "Collection of exams"
+    },
+    "/exams/{examId}/students/{studentId}": {
+      "schema": "Student",
+      "description": "List of students for this exam"
+    },
+    "/exams/{examId}/submissions/{submissionId}": {
+      "schema": "Submission",
+      "description": "Submissions for a specific exam"
+    },
+    "/exams/{examId}/plans/{planId}": {
+      "schema": "PedagogicalPlan",
+      "description": "AI analysis plans for a specific exam/class"
+    },
+    "/access_tokens/{tokenId}": {
+      "schema": "AccessToken",
+      "description": "Unique tokens for student entry"
+    }
+  }
+}

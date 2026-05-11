@@ -1,0 +1,6 @@
+{
+  "name": "Cogniux",
+  "description": "Plataforma inteligente de correção de provas e gestão pedagógica que utiliza IA para analisar respostas, dar notas e apontar erros.",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": []
+}

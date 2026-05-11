@@ -1,0 +1,63 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Bloqueio padrão para segurança máxima
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // Helper para verificar se o usuário é o dono da prova (ou se a prova não tem dono definido - legado)
+    function isExamOwner(examData) {
+      return isSignedIn() && (
+        !('professorId' in examData) || 
+        examData.professorId == request.auth.uid
+      );
+    }
+
+    // Helper para verificar o dono através do documento pai (Exams)
+    function isParentExamOwner(examId) {
+      let exam = get(/databases/$(database)/documents/exams/$(examId)).data;
+      return isExamOwner(exam);
+    }
+
+    match /exams/{examId} {
+      // Alunos podem ler provas individuais (para fazer o teste online)
+      allow get: if true;
+      
+      // Professores podem listar suas próprias provas
+      allow list: if isSignedIn(); // Filtramos por query no cliente, mas as regras protegem a escrita
+      
+      // Criar nova prova
+      allow create: if isSignedIn();
+      
+      // Apenas o dono pode atualizar ou deletar
+      allow update, delete: if isExamOwner(resource.data);
+
+      match /submissions/{subId} {
+        allow create: if true; // Alunos entregam notas
+        // Professor pode ler e deletar notas da sua prova
+        allow read, delete: if isParentExamOwner(examId);
+      }
+
+      match /students/{studentId} {
+        // Professor gerencia seus alunos
+        allow read, write: if isParentExamOwner(examId);
+      }
+
+      match /plans/{planId} {
+        // Professor gerencia planos pedagógicos
+        allow read, write: if isParentExamOwner(examId);
+      }
+    }
+
+    match /access_tokens/{token} {
+      allow get, update: if true; // Alunos verificam e marcam tokens como usados
+      allow list: if isSignedIn();
+      allow create, delete: if isSignedIn();
+    }
+  }
+}
