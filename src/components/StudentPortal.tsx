@@ -1,124 +1,124 @@
 import { useState } from "react";
-import { motion } from "motion/react";
-import { LogIn, BrainCircuit, Sparkles, ArrowRight, Sun, Moon } from "lucide-react";
-import { auth } from "../lib/firebase";
-import { GoogleAuthProvider, signInWithPopup, GithubAuthProvider, OAuthProvider } from "firebase/auth";
+import { useNavigate } from "react-router-dom";
+import { BrainCircuit, ArrowRight, Sun, Moon, LogIn } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Separator } from "@/components/ui/separator";
+import { useAuth } from "@/hooks/useAuth";
+import { useTheme } from "@/hooks/useTheme";
+import { normalizeAccessCode } from "@/lib/accessCode";
+import { db } from "@/lib/firebase";
+import { doc, getDoc } from "firebase/firestore";
+import { toast } from "sonner";
 
-interface StudentPortalProps {
-  onEnterExam: (code: string) => void;
-  onProfessorLogin: (providerName: "google" | "microsoft") => void;
-  isDark: boolean;
-  setIsDark: (v: boolean) => void;
-}
-
-export function StudentPortal({ onEnterExam, onProfessorLogin, isDark, setIsDark }: StudentPortalProps) {
+export function StudentPortal() {
   const [code, setCode] = useState("");
+  const [loading, setLoading] = useState(false);
+  const navigate = useNavigate();
+  const { login } = useAuth();
+  const { isDark, toggle } = useTheme();
 
-  const handleLogin = async (providerType: "google" | "microsoft") => {
-    let provider;
-    if (providerType === "google") {
-      provider = new GoogleAuthProvider();
-    } else {
-      provider = new OAuthProvider('microsoft.com');
-    }
-
+  const handleEnterExam = async () => {
     try {
-      await signInWithPopup(auth, provider);
-      onProfessorLogin(providerType);
-    } catch (error) {
-      console.error("Erro ao fazer login:", error);
-      alert("Falha na autenticação com " + providerType);
+      setLoading(true);
+      const normalized = normalizeAccessCode(code);
+
+      const tokenSnap = await getDoc(doc(db, "access_tokens", normalized));
+      if (tokenSnap.exists()) {
+        const tokenData = tokenSnap.data();
+        if (tokenData.isUsed) {
+          toast.error("Este código de acesso já foi utilizado.");
+          return;
+        }
+        navigate(`/online/${tokenData.examId}?token=${normalized}`);
+        return;
+      }
+
+      navigate(`/online/${normalized}`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Erro ao verificar código.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleProfessorLogin = async (provider: "google" | "microsoft") => {
+    try {
+      await login(provider);
+      navigate("/dashboard");
+    } catch {
+      toast.error(`Falha na autenticação com ${provider}.`);
     }
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex flex-col items-center justify-center p-6 transition-colors relative">
-      <button 
-        onClick={() => setIsDark(!isDark)}
-        className="fixed top-4 right-4 p-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-slate-500 dark:text-slate-400 z-50 hover:bg-slate-50 dark:hover:bg-slate-800 transition-all"
+    <div className="min-h-screen bg-background flex flex-col items-center justify-center p-6 relative">
+      <Button
+        variant="outline"
+        size="icon"
+        className="fixed top-4 right-4"
+        onClick={toggle}
+        aria-label={isDark ? "Tema claro" : "Tema escuro"}
       >
-        {isDark ? <Sun size={20} /> : <Moon size={20} />}
-      </button>
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="max-w-md w-full space-y-8"
-      >
+        {isDark ? <Sun size={18} /> : <Moon size={18} />}
+      </Button>
+
+      <div className="max-w-md w-full space-y-8">
         <div className="text-center space-y-4">
-           <div className="w-20 h-20 bg-gradient-to-br from-indigo-600 to-violet-600 rounded-3xl flex items-center justify-center mx-auto text-white shadow-2xl shadow-indigo-200 dark:shadow-none rotate-3">
-              <BrainCircuit size={44} />
-           </div>
-           <div>
-              <h1 className="text-4xl font-display font-black text-slate-900 dark:text-white uppercase tracking-tighter">Cogniux</h1>
-              <p className="text-slate-500 dark:text-slate-400 font-medium mt-1">Inteligência Pedagógica Avançada</p>
-           </div>
+          <div className="w-16 h-16 bg-primary rounded-2xl flex items-center justify-center mx-auto text-primary-foreground">
+            <BrainCircuit size={36} />
+          </div>
+          <div>
+            <h1 className="text-3xl font-bold tracking-tight">Cogniux</h1>
+            <p className="text-muted-foreground">Inteligência Pedagógica Avançada</p>
+          </div>
         </div>
 
-        <div className="bg-white dark:bg-slate-900 p-8 rounded-[40px] border border-slate-100 dark:border-slate-800 shadow-2xl shadow-slate-200/50 dark:shadow-none space-y-8">
-           <div className="space-y-4">
-              <div className="space-y-2">
-                 <label className="text-xs font-black text-slate-400 uppercase tracking-widest px-1">Código da Atividade</label>
-                 <input 
-                    type="text" 
-                    placeholder="Cole o código aqui..."
-                    className="w-full text-center text-xl p-5 bg-slate-50 dark:bg-slate-800 border-2 border-slate-100 dark:border-slate-700 rounded-2xl focus:border-indigo-600 outline-none transition-all dark:text-white font-black"
-                    value={code}
-                    onChange={(e) => setCode(e.target.value.toUpperCase())}
-                 />
-              </div>
-              <button 
-                 disabled={!code.trim()}
-                 onClick={() => onEnterExam(code)}
-                 className="w-full py-5 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-700 hover:to-violet-700 text-white rounded-2xl font-black transition-all flex items-center justify-center gap-2 disabled:opacity-50 text-lg shadow-xl shadow-indigo-100 dark:shadow-none"
-              >
-                 Acessar Atividade
-                 <ArrowRight size={24} />
-              </button>
-           </div>
+        <Card>
+          <CardHeader>
+            <CardTitle>Acesso do Aluno</CardTitle>
+            <CardDescription>Insira o código da atividade fornecido pelo professor.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="exam-code">Código da Atividade</Label>
+              <Input
+                id="exam-code"
+                placeholder="Cole o código aqui..."
+                className="text-center text-lg font-mono uppercase"
+                value={code}
+                onChange={(e) => setCode(e.target.value.toUpperCase())}
+                onKeyDown={(e) => e.key === "Enter" && code.trim() && handleEnterExam()}
+              />
+            </div>
+            <Button
+              className="w-full"
+              disabled={!code.trim() || loading}
+              onClick={handleEnterExam}
+            >
+              Acessar Atividade
+              <ArrowRight className="ml-2" size={18} />
+            </Button>
 
-           <div className="relative">
-              <div className="absolute inset-0 flex items-center">
-                 <span className="w-full border-t border-slate-100 dark:border-slate-800" />
-              </div>
-              <div className="relative flex justify-center text-xs uppercase">
-                 <span className="bg-white dark:bg-slate-900 px-4 text-slate-400 font-black tracking-widest">Acesso do Professor</span>
-              </div>
-           </div>
+            <Separator />
 
-           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <button 
-                 onClick={() => handleLogin("google")}
-                 className="w-full py-4 bg-white dark:bg-slate-900 border-2 border-slate-100 dark:border-slate-800 text-slate-700 dark:text-slate-300 rounded-2xl font-black flex items-center justify-center gap-3 hover:bg-slate-50 dark:hover:bg-slate-800 transition-all shadow-sm"
-              >
-                 <LogIn size={20} className="text-rose-500" />
-                 Google
-              </button>
-              <button 
-                onClick={() => handleLogin("microsoft")}
-                className="w-full py-4 bg-indigo-50 border-2 border-indigo-100 text-indigo-700 rounded-2xl font-black flex items-center justify-center gap-3 hover:bg-indigo-100 transition-all shadow-sm"
-              >
-                <div className="grid grid-cols-2 gap-0.5">
-                    <div className="w-1.5 h-1.5 bg-red-500"></div>
-                    <div className="w-1.5 h-1.5 bg-green-500"></div>
-                    <div className="w-1.5 h-1.5 bg-blue-500"></div>
-                    <div className="w-1.5 h-1.5 bg-yellow-500"></div>
-                </div>
+            <p className="text-xs text-muted-foreground text-center uppercase tracking-widest font-medium">
+              Acesso do Professor
+            </p>
+            <div className="grid grid-cols-2 gap-3">
+              <Button variant="outline" onClick={() => handleProfessorLogin("google")}>
+                <LogIn className="mr-2" size={16} />
+                Google
+              </Button>
+              <Button variant="outline" onClick={() => handleProfessorLogin("microsoft")}>
                 Outlook
-              </button>
-           </div>
-        </div>
-
-        <div className="flex justify-center flex-wrap gap-4 pt-4">
-           <div className="flex items-center gap-2 text-[10px] font-black text-slate-400 uppercase tracking-widest">
-              <Sparkles size={12} className="text-amber-500" />
-              Correção via IA
-           </div>
-           <div className="flex items-center gap-2 text-[10px] font-black text-slate-400 uppercase tracking-widest">
-              <LogIn size={12} className="text-indigo-500" />
-              Acesso Web
-           </div>
-        </div>
-      </motion.div>
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
     </div>
   );
 }
