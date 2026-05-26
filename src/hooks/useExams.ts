@@ -18,12 +18,17 @@ export function useExams(professorId: string | undefined) {
     );
   }, [professorId]);
 
-  const { data, isPending, isFetching } = useFirestoreCollectionQuery(
+  const { data, isPending, isFetching, isError, error, refetch } = useFirestoreCollectionQuery(
     queryKeys.exams(professorId ?? "none"),
     source,
     mapExams,
     [] as Exam[]
   );
 
-  return { exams: data ?? [], loading: isPending || isFetching };
+  return {
+    exams: data ?? [],
+    loading: !!professorId && (isPending || isFetching),
+    error: isError ? error : null,
+    refetch,
+  };
 }

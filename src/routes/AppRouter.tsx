@@ -19,7 +19,7 @@ export function AppRouter() {
 
       <Route element={<ProtectedRoute />}>
         <Route element={<ProfessorLayout />}>
-          <Route path="/dashboard" element={user ? <Dashboard user={user} /> : null} />
+          <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/exam/create" element={user ? <ExamCreator user={user} /> : null} />
           <Route path="/exam/:id/edit" element={user ? <ExamCreator user={user} /> : null} />
           <Route path="/exam/:id" element={<ExamDetail />} />

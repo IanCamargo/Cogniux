@@ -29,8 +29,9 @@ export class ErrorBoundary extends Component<Props, State> {
   render() {
     if (this.state.hasError) {
       return (
-        <div className="min-h-screen flex items-center justify-center p-6">
-          <Alert variant="destructive" className="max-w-md">
+        <div className="min-h-screen flex items-center justify-center">
+          <div className="container max-w-md">
+            <Alert variant="destructive">
             <AlertCircle className="h-4 w-4" />
             <AlertTitle>Algo deu errado</AlertTitle>
             <AlertDescription className="space-y-4">
@@ -40,6 +41,7 @@ export class ErrorBoundary extends Component<Props, State> {
               </Button>
             </AlertDescription>
           </Alert>
+          </div>
         </div>
       );
     }

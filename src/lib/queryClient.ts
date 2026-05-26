@@ -15,6 +15,7 @@ export const queryClient = new QueryClient({
 });
 
 let authListenerStarted = false;
+let lastExamsInvalidateUid: string | null = null;
 
 export function initAuthQuery(): void {
   if (authListenerStarted) return;
@@ -22,5 +23,13 @@ export function initAuthQuery(): void {
 
   onAuthStateChanged(auth, (user) => {
     queryClient.setQueryData<AuthQueryData>(queryKeys.auth, { user, ready: true });
+    const uid = user?.uid ?? null;
+    if (uid && uid !== lastExamsInvalidateUid) {
+      lastExamsInvalidateUid = uid;
+      void queryClient.invalidateQueries({ queryKey: queryKeys.exams(uid) });
+    }
+    if (!uid) {
+      lastExamsInvalidateUid = null;
+    }
   });
 }

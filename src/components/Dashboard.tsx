@@ -1,8 +1,18 @@
 import { useMemo } from "react";
 import { useNavigate } from "react-router-dom";
-import { User } from "firebase/auth";
 import { collection, deleteDoc, doc, getDocs, query, where } from "firebase/firestore";
-import { BookOpen, Calendar, ChevronRight, Plus, Trash2, Edit2, BarChart3 } from "lucide-react";
+import {
+  BookOpen,
+  Calendar,
+  ChevronRight,
+  Plus,
+  Trash2,
+  Edit2,
+  BarChart3,
+  Globe,
+  Users,
+  Clock,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -18,23 +28,45 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import { useAuth } from "@/hooks/useAuth";
 import { useExams } from "@/hooks/useExams";
 import { useSubmissionScores } from "@/hooks/useSubmissionScores";
-import { calculateDashboardStats } from "@/lib/examStats";
+import { calculateDashboardStats, formatExamCreatedAt } from "@/lib/examStats";
 import { db } from "@/lib/firebase";
-import type { Exam } from "@/types";
+import { queryClient } from "@/lib/queryClient";
+import { queryKeys } from "@/lib/queryKeys";
+import type { Exam, ExamStats } from "@/types";
 import { toast } from "sonner";
 
-interface DashboardProps {
-  user: User;
-}
+const RECENT_EXAMS_LIMIT = 8;
 
-export function Dashboard({ user }: DashboardProps) {
-  const { exams, loading } = useExams(user.uid);
+export function Dashboard() {
+  const { user, loading: authLoading } = useAuth();
+  const { exams, loading, error, refetch } = useExams(user?.uid);
   const navigate = useNavigate();
-  const examIds = useMemo(() => exams.map((e) => e.id), [exams]);
-  const { scores, ready: statsReady } = useSubmissionScores(examIds);
-  const stats = calculateDashboardStats(exams, scores);
+  const examIdsKey = useMemo(() => exams.map((e) => e.id).join(","), [exams]);
+  const examIds = useMemo(
+    () => (examIdsKey ? examIdsKey.split(",") : []),
+    [examIdsKey]
+  );
+  const { scores, statsByExamId, ready: statsReady } = useSubmissionScores(examIds);
+  const dashboardStats = useMemo(() => calculateDashboardStats(exams, scores), [exams, scores]);
+
+  const recentExams = useMemo(() => exams.slice(0, RECENT_EXAMS_LIMIT), [exams]);
+
+  if (authLoading || !user) {
+    return (
+      <div className="space-y-4">
+        <Skeleton className="h-10 w-64" />
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <Skeleton key={i} className="h-24 rounded-lg" />
+          ))}
+        </div>
+        <Skeleton className="h-28 w-full rounded-lg" />
+      </div>
+    );
+  }
 
   const handleDelete = async (examId: string) => {
     try {
@@ -45,6 +77,7 @@ export function Dashboard({ user }: DashboardProps) {
       const tokenSnap = await getDocs(query(collection(db, "access_tokens"), where("examId", "==", examId)));
       await Promise.all(tokenSnap.docs.map((t) => deleteDoc(doc(db, "access_tokens", t.id))));
       await deleteDoc(doc(db, "exams", examId));
+      void queryClient.invalidateQueries({ queryKey: queryKeys.exams(user.uid) });
       toast.success("Prova excluída com sucesso.");
     } catch {
       toast.error("Erro ao excluir prova.");
@@ -56,56 +89,87 @@ export function Dashboard({ user }: DashboardProps) {
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
           <h2 className="text-2xl font-bold">Olá, Prof. {user.displayName?.split(" ")[0]}</h2>
-          <p className="text-muted-foreground">Você tem {exams.length} provas cadastradas.</p>
+          <p className="text-muted-foreground">
+            {loading
+              ? "Carregando suas provas…"
+              : dashboardStats.totalExams === 0
+                ? "Comece criando sua primeira prova."
+                : `${dashboardStats.totalExams} prova${dashboardStats.totalExams !== 1 ? "s" : ""} cadastrada${dashboardStats.totalExams !== 1 ? "s" : ""}.`}
+          </p>
         </div>
-        <div className="flex gap-2 w-full md:w-auto">
-          <Button onClick={() => navigate("/exam/create")} className="flex-1 md:flex-none">
-            <Plus className="mr-2" size={18} /> Nova Prova
-          </Button>
-        </div>
+        <Button onClick={() => navigate("/exam/create")} className="w-full md:w-auto shrink-0">
+          <Plus className="mr-2" size={18} /> Nova Prova
+        </Button>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <Card>
-          <CardHeader className="pb-2">
-            <BookOpen className="text-muted-foreground mb-1" size={24} />
-            <CardTitle className="text-sm font-medium text-muted-foreground">Total de Provas</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {loading ? <Skeleton className="h-10 w-16" /> : <p className="text-3xl font-bold">{stats.totalExams}</p>}
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <Calendar className="text-muted-foreground mb-1" size={24} />
-            <CardTitle className="text-sm font-medium text-muted-foreground">Provas este Mês</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {loading ? <Skeleton className="h-10 w-16" /> : <p className="text-3xl font-bold">{stats.examsThisMonth}</p>}
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <BarChart3 className="text-muted-foreground mb-1" size={24} />
-            <CardTitle className="text-sm font-medium text-muted-foreground">Média Geral</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {!statsReady ? (
-              <Skeleton className="h-10 w-16" />
-            ) : (
-              <p className="text-3xl font-bold">
-                {stats.totalSubmissions > 0 ? stats.averageScore.toFixed(1) : "—"}
-              </p>
-            )}
-            <p className="text-xs text-muted-foreground mt-1">{stats.totalSubmissions} submissões</p>
-          </CardContent>
-        </Card>
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <StatCard
+          icon={<BookOpen size={22} />}
+          label="Total de provas"
+          loading={loading}
+          value={String(dashboardStats.totalExams)}
+        />
+        <StatCard
+          icon={<Calendar size={22} />}
+          label="Criadas este mês"
+          loading={loading}
+          value={String(dashboardStats.examsThisMonth)}
+        />
+        <StatCard
+          icon={<Globe size={22} />}
+          label="Provas online"
+          loading={loading}
+          value={String(dashboardStats.onlineExams)}
+        />
+        <StatCard
+          icon={<BarChart3 size={22} />}
+          label="Média geral"
+          loading={loading || !statsReady}
+          value={dashboardStats.totalSubmissions > 0 ? dashboardStats.averageScore.toFixed(1) : "—"}
+          hint={`${dashboardStats.totalSubmissions} entrega${dashboardStats.totalSubmissions !== 1 ? "s" : ""}`}
+        />
       </div>
 
       <div className="space-y-4">
-        <h3 className="text-xl font-semibold">Provas Recentes</h3>
-        {loading ? (
-          Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-24 w-full rounded-lg" />)
+        <div className="flex items-end justify-between gap-4">
+          <div>
+            <h3 className="text-xl font-semibold">Provas recentes</h3>
+            <p className="text-sm text-muted-foreground">
+              {loading
+                ? "Buscando no Firestore…"
+                : error
+                  ? "Não foi possível carregar a lista."
+                  : exams.length === 0
+                    ? "Suas atividades aparecerão aqui."
+                    : exams.length > RECENT_EXAMS_LIMIT
+                      ? `Últimas ${RECENT_EXAMS_LIMIT} de ${exams.length}, ordenadas por data.`
+                      : "Ordenadas da mais recente para a mais antiga."}
+            </p>
+          </div>
+          {!loading && !error && exams.length > RECENT_EXAMS_LIMIT && (
+            <p className="text-sm text-muted-foreground shrink-0">
+              +{exams.length - RECENT_EXAMS_LIMIT} mais antigas
+            </p>
+          )}
+        </div>
+
+        {error ? (
+          <Card className="border-destructive/40">
+            <CardContent className="py-8 text-center space-y-4">
+              <p className="text-sm text-muted-foreground">
+                {error instanceof Error ? error.message : "Erro ao carregar provas."}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Se a mensagem citar índice, rode{" "}
+                <code className="rounded bg-muted px-1">npm run deploy:firestore</code> ou crie o índice no Console Firebase.
+              </p>
+              <Button variant="outline" onClick={() => void refetch()}>
+                Tentar novamente
+              </Button>
+            </CardContent>
+          </Card>
+        ) : loading ? (
+          Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-28 w-full rounded-lg" />)
         ) : exams.length === 0 ? (
           <Card className="border-dashed">
             <CardContent className="py-12 text-center">
@@ -114,10 +178,12 @@ export function Dashboard({ user }: DashboardProps) {
             </CardContent>
           </Card>
         ) : (
-          exams.map((exam) => (
+          recentExams.map((exam) => (
             <ExamRow
               key={exam.id}
               exam={exam}
+              examStats={statsByExamId[exam.id]}
+              statsReady={statsReady}
               onOpen={() => navigate(`/exam/${exam.id}`)}
               onEdit={() => navigate(`/exam/${exam.id}/edit`)}
               onDelete={() => handleDelete(exam.id)}
@@ -129,57 +195,132 @@ export function Dashboard({ user }: DashboardProps) {
   );
 }
 
+function StatCard({
+  icon,
+  label,
+  value,
+  loading,
+  hint,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  value: string;
+  loading: boolean;
+  hint?: string;
+}) {
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <div className="text-muted-foreground mb-1">{icon}</div>
+        <CardTitle className="text-sm font-medium text-muted-foreground">{label}</CardTitle>
+      </CardHeader>
+      <CardContent>
+        {loading ? <Skeleton className="h-9 w-14" /> : <p className="text-2xl font-bold tabular-nums">{value}</p>}
+        {hint && !loading && <p className="text-xs text-muted-foreground mt-1">{hint}</p>}
+      </CardContent>
+    </Card>
+  );
+}
+
 function ExamRow({
   exam,
+  examStats,
+  statsReady,
   onOpen,
   onEdit,
   onDelete,
 }: {
   exam: Exam;
+  examStats?: ExamStats;
+  statsReady: boolean;
   onOpen: () => void;
   onEdit: () => void;
   onDelete: () => void;
 }) {
+  const createdLabel = formatExamCreatedAt(exam.createdAt);
+  const submissionCount = examStats?.count ?? 0;
+  const avgLabel =
+    statsReady && submissionCount > 0 ? examStats!.average.toFixed(1) : submissionCount > 0 ? "…" : "—";
+
   return (
     <Card className="cursor-pointer hover:bg-muted/50 transition-colors" onClick={onOpen}>
-      <CardContent className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 p-6">
-        <div className="flex items-center gap-4">
-          <div className="w-12 h-12 bg-muted rounded-lg flex items-center justify-center">
-            <BookOpen size={24} />
+      <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex min-w-0 flex-1 items-start gap-4">
+          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-muted">
+            <BookOpen size={22} className="text-muted-foreground" />
           </div>
-          <div>
-            <h4 className="font-semibold text-lg">{exam.subject}</h4>
-            <div className="flex flex-wrap gap-2 mt-1">
+          <div className="min-w-0 space-y-2">
+            <div>
+              <h4 className="font-semibold text-lg truncate">{exam.subject}</h4>
+              {createdLabel && (
+                <p className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5">
+                  <Clock size={12} />
+                  Criada {createdLabel}
+                </p>
+              )}
+            </div>
+            <div className="flex flex-wrap gap-1.5">
               <Badge variant="secondary">{exam.semester}</Badge>
+              {exam.isOnline ? (
+                <Badge className="gap-1">
+                  <Globe size={12} /> Online
+                </Badge>
+              ) : (
+                <Badge variant="outline">Presencial</Badge>
+              )}
               {exam.course && <Badge variant="outline">{exam.course}</Badge>}
+              {exam.className && <Badge variant="outline">Turma {exam.className}</Badge>}
+              {exam.unit && <Badge variant="outline">Un. {exam.unit}</Badge>}
               <Badge variant="outline">{exam.numQuestions} questões</Badge>
             </div>
           </div>
         </div>
-        <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
-          <Button variant="ghost" size="icon" onClick={onEdit} aria-label="Editar prova">
-            <Edit2 size={18} />
-          </Button>
-          <AlertDialog>
-            <AlertDialogTrigger>
-              <Button variant="ghost" size="icon" aria-label="Excluir prova">
-                <Trash2 size={18} />
-              </Button>
-            </AlertDialogTrigger>
-            <AlertDialogContent>
-              <AlertDialogHeader>
-                <AlertDialogTitle>Excluir prova?</AlertDialogTitle>
-                <AlertDialogDescription>
-                  Todos os dados de alunos, notas e tokens serão removidos permanentemente.
-                </AlertDialogDescription>
-              </AlertDialogHeader>
-              <AlertDialogFooter>
-                <AlertDialogCancel>Cancelar</AlertDialogCancel>
-                <AlertDialogAction onClick={onDelete}>Excluir</AlertDialogAction>
-              </AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
-          <ChevronRight className="text-muted-foreground" size={20} />
+
+        <div className="flex items-center justify-between gap-4 sm:justify-end sm:shrink-0">
+          <div className="text-right text-sm">
+            <p className="text-muted-foreground flex items-center justify-end gap-1">
+              <Users size={14} />
+              {statsReady ? (
+                <>
+                  <span className="font-medium text-foreground">{submissionCount}</span> entregas
+                </>
+              ) : (
+                <Skeleton className="h-4 w-16 inline-block" />
+              )}
+            </p>
+            <p className="text-muted-foreground mt-0.5">
+              Média: <span className="font-medium text-foreground">{avgLabel}</span>
+            </p>
+          </div>
+          <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+            <Button variant="ghost" size="icon" onClick={onEdit} aria-label="Editar prova">
+              <Edit2 size={18} />
+            </Button>
+            <AlertDialog>
+              <AlertDialogTrigger
+                render={
+                  <Button variant="ghost" size="icon" aria-label="Excluir prova">
+                    <Trash2 size={18} />
+                  </Button>
+                }
+              />
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Excluir prova?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    Todos os dados de alunos, notas e tokens serão removidos permanentemente.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                  <AlertDialogAction variant="destructive" onClick={onDelete}>
+                    Excluir
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+            <ChevronRight className="text-muted-foreground shrink-0" size={20} />
+          </div>
         </div>
       </CardContent>
     </Card>

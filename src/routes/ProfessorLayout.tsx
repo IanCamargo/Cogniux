@@ -12,8 +12,10 @@ export function ProfessorLayout() {
   return (
     <div className="min-h-screen bg-background flex flex-col">
       <Header user={user} isDark={isDark} onToggleTheme={toggle} />
-      <main className="flex-1 max-w-6xl w-full mx-auto p-6">
-        <Outlet />
+      <main className="flex-1 py-6">
+        <div className="container">
+          <Outlet />
+        </div>
       </main>
     </div>
   );

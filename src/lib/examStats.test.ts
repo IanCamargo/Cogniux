@@ -24,6 +24,7 @@ describe("calculateDashboardStats", () => {
     );
     expect(stats.totalExams).toBe(1);
     expect(stats.examsThisMonth).toBe(1);
+    expect(stats.onlineExams).toBe(0);
     expect(stats.totalSubmissions).toBe(2);
     expect(stats.averageScore).toBe(7);
   });

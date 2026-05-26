@@ -167,7 +167,6 @@ export function ExamDetail() {
               <TabsTrigger value="students">Alunos</TabsTrigger>
               <TabsTrigger value="submissions">Notas</TabsTrigger>
               <TabsTrigger value="plan">Plano de Ação</TabsTrigger>
-              <TabsTrigger value="tokens">Acesso Online</TabsTrigger>
               <TabsTrigger value="print">Imprimir</TabsTrigger>
             </TabsList>
 
@@ -215,18 +214,61 @@ export function ExamDetail() {
                 <Input value={newStudentName} onChange={(e) => setNewStudentName(e.target.value)} placeholder="Nome do aluno" />
                 <Button type="submit"><PlusCircle className="mr-2" size={16} /> Adicionar</Button>
               </form>
-              <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                {students.map((s) => (
-                  <Card key={s.id}>
-                    <CardContent className="flex justify-between items-center p-4">
-                      <span className="font-medium truncate">{s.name}</span>
-                      <Button variant="ghost" size="icon" aria-label="Remover aluno" onClick={async () => {
-                        await deleteDoc(doc(db, "exams", examId, "students", s.id));
-                      }}><Trash2 size={16} /></Button>
-                    </CardContent>
-                  </Card>
-                ))}
-              </div>
+              {exam.isOnline && (
+                <p className="text-sm text-muted-foreground">
+                  Gere um código de acesso por aluno para a prova online.
+                </p>
+              )}
+              {students.length === 0 ? (
+                <Card className="border-dashed">
+                  <CardContent className="py-12 text-center text-muted-foreground">
+                    Nenhum aluno cadastrado.
+                  </CardContent>
+                </Card>
+              ) : (
+                <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {students.map((s) => (
+                    <Card key={s.id}>
+                      <CardContent className="p-4 space-y-3">
+                        <div className="flex justify-between items-center gap-2">
+                          <span className="font-medium truncate">{s.name}</span>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            aria-label="Remover aluno"
+                            onClick={async () => {
+                              await deleteDoc(doc(db, "exams", examId, "students", s.id));
+                            }}
+                          >
+                            <Trash2 size={16} />
+                          </Button>
+                        </div>
+                        {exam.isOnline &&
+                          (tokens[s.id] ? (
+                            <div className="flex items-center justify-between bg-muted p-3 rounded-lg">
+                              <code className="font-mono font-bold tracking-widest">{tokens[s.id].token}</code>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                aria-label="Copiar código de acesso"
+                                onClick={() => {
+                                  navigator.clipboard.writeText(tokens[s.id].token);
+                                  toast.success("Copiado!");
+                                }}
+                              >
+                                <Copy size={16} />
+                              </Button>
+                            </div>
+                          ) : (
+                            <Button className="w-full" size="sm" onClick={() => generateToken(s.id, s.name)}>
+                              <Key className="mr-2" size={14} /> Gerar código de acesso
+                            </Button>
+                          ))}
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+              )}
             </TabsContent>
 
             <TabsContent value="submissions" className="mt-6 space-y-4">
@@ -293,31 +335,6 @@ export function ExamDetail() {
                   </CardContent>
                 )}
               </Card>
-            </TabsContent>
-
-            <TabsContent value="tokens" className="mt-6">
-              <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {students.map((s) => (
-                  <Card key={s.id}>
-                    <CardContent className="p-4 space-y-3">
-                      <p className="font-medium">{s.name}</p>
-                      {tokens[s.id] ? (
-                        <div className="flex items-center justify-between bg-muted p-3 rounded-lg">
-                          <code className="font-mono font-bold tracking-widest">{tokens[s.id].token}</code>
-                          <Button variant="ghost" size="icon" aria-label="Copiar token" onClick={() => {
-                            navigator.clipboard.writeText(tokens[s.id].token);
-                            toast.success("Copiado!");
-                          }}><Copy size={16} /></Button>
-                        </div>
-                      ) : (
-                        <Button className="w-full" size="sm" onClick={() => generateToken(s.id, s.name)}>
-                          <Key className="mr-2" size={14} /> Gerar Código
-                        </Button>
-                      )}
-                    </CardContent>
-                  </Card>
-                ))}
-              </div>
             </TabsContent>
 
             <TabsContent value="print" className="mt-6">

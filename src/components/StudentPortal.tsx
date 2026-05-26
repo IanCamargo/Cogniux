@@ -54,7 +54,7 @@ export function StudentPortal() {
   };
 
   return (
-    <div className="min-h-screen bg-background flex flex-col items-center justify-center p-6 relative">
+    <div className="min-h-screen bg-background flex flex-col items-center justify-center relative">
       <Button
         variant="outline"
         size="icon"
@@ -65,7 +65,7 @@ export function StudentPortal() {
         {isDark ? <Sun size={18} /> : <Moon size={18} />}
       </Button>
 
-      <div className="max-w-md w-full space-y-8">
+      <div className="container max-w-md space-y-8 py-6">
         <div className="text-center space-y-4">
           <div className="w-16 h-16 bg-primary rounded-2xl flex items-center justify-center mx-auto text-primary-foreground">
             <BrainCircuit size={36} />

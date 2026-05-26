@@ -7,12 +7,13 @@ import {
   type Query,
   type QuerySnapshot,
 } from "firebase/firestore";
+import { auth } from "@/lib/firebase";
 
 export function useFirestoreCollectionQuery<T>(
   queryKey: QueryKey,
   firestoreQuery: Query<DocumentData> | null | undefined,
   select: (snap: QuerySnapshot<DocumentData>) => T,
-  initialData?: T
+  pendingPlaceholder?: T
 ) {
   const queryClient = useQueryClient();
   const selectRef = useRef(select);
@@ -20,23 +21,48 @@ export function useFirestoreCollectionQuery<T>(
 
   useEffect(() => {
     if (!firestoreQuery) return;
-    return onSnapshot(firestoreQuery, (snap) => {
-      queryClient.setQueryData(queryKey, selectRef.current(snap));
-    });
+    return onSnapshot(
+      firestoreQuery,
+      (snap) => {
+        queryClient.setQueryData(queryKey, selectRef.current(snap));
+      },
+      (error) => {
+        console.error("Firestore onSnapshot error:", error);
+      }
+    );
   }, [queryClient, firestoreQuery, queryKey]);
 
   const query = useQuery({
     queryKey,
     queryFn: async () => {
-      if (!firestoreQuery) return initialData as T;
+      if (!firestoreQuery) return (pendingPlaceholder ?? []) as T;
+      await auth.authStateReady();
+      if (!auth.currentUser) {
+        throw new Error("Sessão não autenticada.");
+      }
       const snap = await getDocs(firestoreQuery);
       return selectRef.current(snap);
     },
     enabled: !!firestoreQuery,
-    initialData,
     staleTime: Infinity,
     refetchOnMount: false,
+    retry: 2,
   });
 
-  return { ...query, data: query.data ?? initialData };
+  const data = query.isError
+    ? undefined
+    : query.data !== undefined
+      ? query.data
+      : query.isPending
+        ? pendingPlaceholder
+        : undefined;
+
+  return {
+    data,
+    isPending: query.isPending,
+    isFetching: query.isFetching,
+    isError: query.isError,
+    error: query.error,
+    refetch: query.refetch,
+  };
 }

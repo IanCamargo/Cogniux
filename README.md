@@ -38,6 +38,8 @@ VITE_FIREBASE_APP_ID=
 VITE_FIREBASE_FIRESTORE_DATABASE_ID=
 ```
 
+Se o salvamento falhar com erro de Firestore, siga [docs/FIREBASE_SETUP.md](docs/FIREBASE_SETUP.md) (ativar API + criar banco + `npm run deploy:firestore-rules`). Verifique com `npm run check:firestore`.
+
 3. Execute em desenvolvimento:
 
 ```bash

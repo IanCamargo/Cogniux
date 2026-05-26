@@ -51,8 +51,9 @@ export function OnlineExam() {
 function OnlineExamError({ message }: { message: string }) {
   const navigate = useNavigate();
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center p-6">
-      <Alert variant="destructive" className="max-w-md">
+    <div className="min-h-screen flex flex-col items-center justify-center">
+      <div className="container max-w-md">
+        <Alert variant="destructive">
         <AlertCircle className="h-4 w-4" />
         <AlertTitle>Ops!</AlertTitle>
         <AlertDescription className="space-y-4">
@@ -60,6 +61,7 @@ function OnlineExamError({ message }: { message: string }) {
           <Button variant="outline" onClick={() => navigate("/portal")}>Voltar ao Portal</Button>
         </AlertDescription>
       </Alert>
+      </div>
     </div>
   );
 }
@@ -135,13 +137,14 @@ function OnlineExamContent({
   const progress = (answers.filter(Boolean).length / exam.numQuestions) * 100;
 
   return (
-    <div className="min-h-screen bg-background p-4 md:p-8" onKeyDown={handleKeyDown} tabIndex={0}>
+    <div className="min-h-screen bg-background" onKeyDown={handleKeyDown} tabIndex={0}>
       <Button variant="outline" size="icon" className="fixed top-4 right-4 z-50" onClick={toggle} aria-label="Alternar tema">
         {isDark ? <Sun size={18} /> : <Moon size={18} />}
       </Button>
 
+      <div className="container max-w-3xl py-16 md:py-8">
       {step === "name" && (
-        <Card className="max-w-md mx-auto mt-16">
+        <Card>
           <CardHeader className="text-center">
             <BrainCircuit className="mx-auto mb-2" size={32} />
             <CardTitle>Identificação do Aluno</CardTitle>
@@ -167,7 +170,7 @@ function OnlineExamContent({
       )}
 
       {step === "exam" && (
-        <Card className="max-w-3xl mx-auto">
+        <Card>
           <CardHeader className="border-b">
             <div className="flex justify-between items-start">
               <div>
@@ -243,7 +246,7 @@ function OnlineExamContent({
       )}
 
       {step === "finished" && (
-        <Card className="max-w-md mx-auto mt-16 text-center">
+        <Card className="text-center">
           <CardContent className="pt-8 space-y-6">
             <CheckCircle2 className="mx-auto text-emerald-500" size={64} />
             <div>
@@ -254,6 +257,7 @@ function OnlineExamContent({
           </CardContent>
         </Card>
       )}
+      </div>
     </div>
   );
 }

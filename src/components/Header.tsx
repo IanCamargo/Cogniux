@@ -31,7 +31,7 @@ export function Header({ user, isDark, onToggleTheme }: HeaderProps) {
 
   return (
     <header className="bg-background border-b sticky top-0 z-50">
-      <div className="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
+      <div className="container flex h-16 items-center justify-between">
         <Link to="/dashboard" className="flex items-center gap-2">
           <div className="p-1.5 bg-primary rounded-lg text-primary-foreground">
             <BrainCircuit size={24} />

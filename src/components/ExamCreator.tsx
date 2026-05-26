@@ -2,20 +2,37 @@ import { useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { User } from "firebase/auth";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useForm } from "react-hook-form";
+import { Controller, useForm } from "react-hook-form";
 import { z } from "zod";
-import { collection, addDoc, updateDoc, doc, serverTimestamp } from "firebase/firestore";
-import { ArrowLeft, Save, Sparkles, Wand2, Loader2, Paperclip, X, FileUp } from "lucide-react";
+import { collection, addDoc, updateDoc, doc, enableNetwork, serverTimestamp } from "firebase/firestore";
+import { ArrowLeft, Sparkles, Wand2, Loader2, Paperclip, X, FileUp, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { db } from "@/lib/firebase";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { auth, db } from "@/lib/firebase";
+import { getFirebaseConfig } from "@/lib/env";
+import { getFirestoreErrorMessage, stripUndefined } from "@/lib/firestorePayload";
+import { queryClient } from "@/lib/queryClient";
 import { queryKeys } from "@/lib/queryKeys";
 import { useFirestoreDocQuery } from "@/hooks/firestore/useFirestoreDocQuery";
 import { generateExamQuestions, generateAnswerKey } from "@/services/geminiService";
@@ -23,21 +40,111 @@ import type { Exam, GeneratedQuestion } from "@/types";
 import { toast } from "sonner";
 
 const step1Schema = z.object({
-  subject: z.string().min(1, "Matéria é obrigatória"),
-  semester: z.string().min(1),
+  subject: z.string().trim().min(1, "Matéria é obrigatória."),
+  semester: z.string().trim().min(1, "Semestre é obrigatório."),
   course: z.string().optional(),
   className: z.string().optional(),
   unit: z.string().optional(),
-  numQuestions: z.number().min(1).max(100),
+  numQuestions: z
+    .number({
+      invalid_type_error: "Informe a quantidade de questões.",
+      required_error: "Informe a quantidade de questões.",
+    })
+    .int("Use um número inteiro.")
+    .min(1, "Mínimo de 1 questão.")
+    .max(100, "Máximo de 100 questões."),
   alternativesPerQuestion: z.number().min(2).max(5),
   isOnline: z.boolean(),
 });
 
-type Step1Data = z.infer<typeof step1Schema>;
+const aiGenerationSchema = step1Schema.extend({
+  topic: z.string().trim().min(1, "Tópico é obrigatório para gerar com IA."),
+});
+
+interface Step1FormValues {
+  subject: string;
+  semester: string;
+  course?: string;
+  className?: string;
+  unit?: string;
+  numQuestions: number;
+  alternativesPerQuestion: number;
+  isOnline: boolean;
+}
+
+function applyZodErrors(
+  error: z.ZodError,
+  setFieldError: (name: keyof Step1FormValues, message: string) => void,
+  onTopicError?: (message: string) => void
+) {
+  error.issues.forEach((issue) => {
+    const field = issue.path[0];
+    if (field === "topic") {
+      onTopicError?.(issue.message);
+      return;
+    }
+    if (typeof field === "string" && field in step1Schema.shape) {
+      setFieldError(field as keyof Step1FormValues, issue.message);
+    }
+  });
+}
 
 const defaultSemester = `${new Date().getFullYear()}.${new Date().getMonth() < 6 ? "1" : "2"}`;
 
-const defaultFormValues: Step1Data = {
+function RequiredMark() {
+  return (
+    <span className="text-destructive" aria-hidden="true">
+      *
+    </span>
+  );
+}
+
+function FieldLabel({
+  htmlFor,
+  children,
+  required,
+}: {
+  htmlFor?: string;
+  children: React.ReactNode;
+  required?: boolean;
+}) {
+  return (
+    <Label htmlFor={htmlFor}>
+      {children}
+      {required && <RequiredMark />}
+    </Label>
+  );
+}
+
+function LabelWithTooltip({
+  htmlFor,
+  label,
+  tooltip,
+  required,
+}: {
+  htmlFor?: string;
+  label: string;
+  tooltip: string;
+  required?: boolean;
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <Label htmlFor={htmlFor} className="w-fit cursor-help">
+            {label}
+            {required && <RequiredMark />}
+          </Label>
+        }
+      />
+      <TooltipContent side="top" className="max-w-xs text-left">
+        {tooltip}
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
+const defaultFormValues: Step1FormValues = {
   subject: "",
   semester: defaultSemester,
   course: "",
@@ -66,14 +173,7 @@ export function ExamCreator({ user }: ExamCreatorProps) {
     return <Skeleton className="h-64 w-full" />;
   }
 
-  return (
-    <ExamCreatorForm
-      key={editId ?? "new"}
-      user={user}
-      editId={editId}
-      existingExam={existingExam ?? null}
-    />
-  );
+  return <ExamCreatorForm key={editId ?? "new"} user={user} editId={editId} existingExam={existingExam ?? null} />;
 }
 
 function ExamCreatorForm({
@@ -92,10 +192,12 @@ function ExamCreatorForm({
   const [answerKey, setAnswerKey] = useState<string[]>(existingExam?.answerKey ?? []);
   const [loading, setLoading] = useState(false);
   const [aiGenerating, setAiGenerating] = useState(false);
+  const [hasGeneratedWithAI, setHasGeneratedWithAI] = useState((existingExam?.answerKey?.length ?? 0) > 0);
   const [topic, setTopic] = useState("");
+  const [topicError, setTopicError] = useState<string | null>(null);
   const [contextFiles, setContextFiles] = useState<{ name: string; data: string; mimeType: string }[]>([]);
 
-  const form = useForm<Step1Data>({
+  const form = useForm<Step1FormValues>({
     resolver: zodResolver(step1Schema),
     defaultValues: existingExam
       ? {
@@ -126,34 +228,64 @@ function ExamCreatorForm({
     });
   };
 
-  const handleNext = form.handleSubmit((data) => {
+  const handleNext = (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    setTopicError(null);
+    form.clearErrors();
+
+    const validation = aiGenerationSchema.safeParse({ ...form.getValues(), topic });
+    if (!validation.success) {
+      applyZodErrors(validation.error, (name, message) => form.setError(name, { message }), setTopicError);
+      toast.error("Preencha os campos obrigatórios.");
+      return;
+    }
+
+    if (!hasGeneratedWithAI) {
+      setTopicError("Gere a prova com IA antes de continuar.");
+      toast.error("Gere a prova com IA antes de continuar.");
+      return;
+    }
+
+    const data = validation.data;
     if (answerKey.length !== data.numQuestions) {
       const newKey = [...answerKey];
       while (newKey.length < data.numQuestions) newKey.push("");
       setAnswerKey(newKey.slice(0, data.numQuestions));
     }
     setStep(2);
-  });
+  };
 
   const handleGenerateAI = async () => {
-    const subject = form.getValues("subject");
-    if (!subject || !topic) {
-      toast.error("Preencha a matéria e o tópico.");
+    setTopicError(null);
+    form.clearErrors();
+
+    const validation = aiGenerationSchema.safeParse({ ...form.getValues(), topic });
+    if (!validation.success) {
+      applyZodErrors(validation.error, (name, message) => form.setError(name, { message }), setTopicError);
+      toast.error("Corrija os campos antes de gerar.");
       return;
     }
+
+    const { subject, numQuestions, topic: validatedTopic } = validation.data;
     setAiGenerating(true);
     try {
       const filesForAI = contextFiles.map((f) => ({ data: f.data, mimeType: f.mimeType }));
-      const numQ = form.getValues("numQuestions");
       if (generationMode === "full") {
-        const generated = await generateExamQuestions(subject, topic, numQ, "intermediate", filesForAI);
+        const generated = await generateExamQuestions(
+          subject,
+          validatedTopic,
+          numQuestions,
+          "intermediate",
+          filesForAI
+        );
         setQuestions(generated);
         setAnswerKey(generated.map((q) => q.correctAnswer));
       } else {
-        const key = await generateAnswerKey(subject, topic, numQ, filesForAI);
+        const key = await generateAnswerKey(subject, validatedTopic, numQuestions, filesForAI);
         setAnswerKey(key);
         setQuestions([]);
       }
+      setHasGeneratedWithAI(true);
       toast.success("Conteúdo gerado com sucesso!");
     } catch {
       toast.error("Erro ao gerar conteúdo via IA.");
@@ -162,55 +294,130 @@ function ExamCreatorForm({
     }
   };
 
+  const handleRemoveQuestion = (idx: number) => {
+    if (answerKey.length <= 1) {
+      toast.error("A prova precisa ter pelo menos uma questão.");
+      return;
+    }
+    const newCount = answerKey.length - 1;
+    setAnswerKey((prev) => prev.filter((_, i) => i !== idx));
+    setQuestions((prev) => prev.filter((_, i) => i !== idx));
+    form.setValue("numQuestions", newCount);
+  };
+
   const saveExam = async () => {
-    if (answerKey.includes("")) {
-      toast.error("Preencha todas as respostas do gabarito.");
+    const unanswered = answerKey.findIndex((ans) => !ans);
+    if (unanswered !== -1) {
+      toast.error(`Marque a alternativa correta da questão ${unanswered + 1}.`);
       return;
     }
     setLoading(true);
+    const saveTimeoutMs = 30_000;
     try {
       const data = form.getValues();
-      const payload = {
+      const payload = stripUndefined({
         ...data,
         answerKey,
         questions: questions.length > 0 ? questions : null,
         professorId: user.uid,
-      };
-
-      if (editId) {
-        await updateDoc(doc(db, "exams", editId), { ...payload, updatedAt: serverTimestamp() });
-        navigate(`/exam/${editId}`);
-      } else {
-        const docRef = await addDoc(collection(db, "exams"), { ...payload, createdAt: serverTimestamp() });
-        navigate(`/exam/${docRef.id}`);
+      });
+      const currentUser = auth.currentUser;
+      if (!currentUser) {
+        throw new Error("Sessão expirada. Faça login novamente.");
       }
+      await currentUser.getIdToken(true);
+      await enableNetwork(db);
+
+      const writePromise = (async (): Promise<string> => {
+        if (editId) {
+          await updateDoc(doc(db, "exams", editId), { ...payload, updatedAt: serverTimestamp() });
+          return editId;
+        }
+        const docRef = await addDoc(collection(db, "exams"), { ...payload, createdAt: serverTimestamp() });
+        return docRef.id;
+      })();
+
+      const targetId = await Promise.race([
+        writePromise,
+        new Promise<never>((_, reject) => {
+          setTimeout(
+            () => reject(new Error("Tempo esgotado ao salvar. Verifique a conexão e o Firebase.")),
+            saveTimeoutMs
+          );
+        }),
+      ]);
+
       toast.success("Prova salva com sucesso!");
-    } catch {
-      toast.error("Erro ao salvar prova.");
+      navigate(`/exam/${targetId}`, { replace: true });
+
+      void queryClient.invalidateQueries({ queryKey: queryKeys.exams(user.uid), refetchType: "none" });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.exam(targetId), refetchType: "none" });
+    } catch (error) {
+      console.error("saveExam failed:", error);
+      toast.error(getFirestoreErrorMessage(error, getFirebaseConfig().projectId));
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="max-w-4xl mx-auto space-y-6 pb-12">
-      <Button variant="ghost" onClick={() => navigate("/dashboard")}>
-        <ArrowLeft className="mr-2" size={18} /> Voltar
-      </Button>
+    <div className="mx-auto w-full max-w-4xl space-y-4 pb-12">
+      <div className="flex items-center justify-between gap-2">
+        <Button variant="ghost" onClick={() => (step === 2 ? setStep(1) : navigate("/dashboard"))}>
+          <ArrowLeft className="mr-2" size={18} /> Voltar
+        </Button>
+        {step === 1 ? (
+          <Button type="submit" form="exam-creator-step1">
+            Continuar
+          </Button>
+        ) : (
+          <AlertDialog>
+            <AlertDialogTrigger
+              render={
+                <Button type="button" disabled={loading}>
+                  {loading && <Loader2 className="animate-spin mr-2" size={18} />}
+                  Salvar
+                </Button>
+              }
+            />
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Salvar atividade?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  A prova será gravada e você será levado à página de detalhes.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel disabled={loading}>Cancelar</AlertDialogCancel>
+                <AlertDialogAction disabled={loading} onClick={() => void saveExam()}>
+                  {loading && <Loader2 className="animate-spin mr-2" size={18} />}
+                  Salvar
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        )}
+      </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>{editId ? "Editar Atividade" : "Criar Nova Atividade"}</CardTitle>
-          <CardDescription>Passo {step} de 2</CardDescription>
-        </CardHeader>
-        <CardContent>
-          {step === 1 ? (
-            <form onSubmit={handleNext} className="space-y-6">
+      {step === 1 ? (
+        <Card className="overflow-visible">
+          <CardHeader>
+            <CardTitle>{editId ? "Editar Atividade" : "Criar Nova Atividade"}</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <form id="exam-creator-step1" onSubmit={handleNext} className="space-y-6">
               <div className="grid md:grid-cols-2 gap-6">
                 <div className="space-y-4">
                   <div className="space-y-2">
-                    <Label htmlFor="subject">Matéria / UC</Label>
-                    <Input id="subject" {...form.register("subject")} placeholder="Ex: Algoritmos II" />
+                    <FieldLabel htmlFor="subject" required>
+                      Matéria / UC
+                    </FieldLabel>
+                    <Input
+                      id="subject"
+                      aria-invalid={!!form.formState.errors.subject}
+                      {...form.register("subject")}
+                      placeholder="Ex: Algoritmos II"
+                    />
                     {form.formState.errors.subject && (
                       <p className="text-sm text-destructive">{form.formState.errors.subject.message}</p>
                     )}
@@ -231,30 +438,54 @@ function ExamCreatorForm({
                       <Input id="unit" {...form.register("unit")} />
                     </div>
                     <div className="space-y-2">
-                      <Label htmlFor="semester">Semestre</Label>
-                      <Input id="semester" {...form.register("semester")} />
+                      <FieldLabel htmlFor="semester" required>
+                        Semestre
+                      </FieldLabel>
+                      <Input
+                        id="semester"
+                        aria-invalid={!!form.formState.errors.semester}
+                        {...form.register("semester")}
+                      />
+                      {form.formState.errors.semester && (
+                        <p className="text-sm text-destructive">{form.formState.errors.semester.message}</p>
+                      )}
                     </div>
                   </div>
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-2">
-                      <Label htmlFor="numQuestions">Qtd. Questões</Label>
+                      <FieldLabel htmlFor="numQuestions" required>
+                        Qtd. Questões
+                      </FieldLabel>
                       <Input
                         id="numQuestions"
                         type="number"
+                        aria-invalid={!!form.formState.errors.numQuestions}
                         {...form.register("numQuestions", { valueAsNumber: true })}
                       />
+                      {form.formState.errors.numQuestions && (
+                        <p className="text-sm text-destructive">{form.formState.errors.numQuestions.message}</p>
+                      )}
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="alternatives">Alternativas</Label>
-                      <select
-                        id="alternatives"
-                        className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm"
-                        {...form.register("alternativesPerQuestion", { valueAsNumber: true })}
-                      >
-                        {[2, 3, 4, 5].map((v) => (
-                          <option key={v} value={v}>{v}</option>
-                        ))}
-                      </select>
+                      <Controller
+                        name="alternativesPerQuestion"
+                        control={form.control}
+                        render={({ field }) => (
+                          <Select value={field.value} onValueChange={(value) => field.onChange(value)}>
+                            <SelectTrigger id="alternatives" className="w-full">
+                              <SelectValue placeholder="Selecione" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {[2, 3, 4, 5].map((n) => (
+                                <SelectItem key={n} value={n}>
+                                  {n}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        )}
+                      />
                     </div>
                   </div>
                   <div className="flex items-center gap-3">
@@ -267,18 +498,31 @@ function ExamCreatorForm({
                   </div>
                 </div>
 
-                <div className="space-y-4 p-4 border rounded-lg bg-muted/30">
+                <div className="space-y-4">
                   <div className="flex items-center gap-2 font-medium">
                     <Sparkles size={18} /> Geração via IA
                   </div>
-                  <Tabs value={generationMode} onValueChange={(v) => setGenerationMode(v as "full" | "key")}>
-                    <TabsList className="w-full">
-                      <TabsTrigger value="full" className="flex-1">Prova Completa</TabsTrigger>
-                      <TabsTrigger value="key" className="flex-1">Apenas Gabarito</TabsTrigger>
-                    </TabsList>
-                  </Tabs>
                   <div className="space-y-2">
-                    <Label>Anexos (PDF, imagens)</Label>
+                    <LabelWithTooltip
+                      label="Modo de geração"
+                      tooltip="Prova Completa cria enunciados, alternativas e gabarito. Apenas Gabarito gera somente as letras corretas para você montar as questões manualmente."
+                    />
+                    <Tabs value={generationMode} onValueChange={(v) => setGenerationMode(v as "full" | "key")}>
+                      <TabsList className="w-full">
+                        <TabsTrigger value="full" className="flex-1">
+                          Prova Completa
+                        </TabsTrigger>
+                        <TabsTrigger value="key" className="flex-1">
+                          Apenas Gabarito
+                        </TabsTrigger>
+                      </TabsList>
+                    </Tabs>
+                  </div>
+                  <div className="space-y-2">
+                    <LabelWithTooltip
+                      label="Anexos (PDF, imagens)"
+                      tooltip="Opcional. A IA usa esses arquivos como referência para criar questões ou gabarito alinhados ao seu material."
+                    />
                     <div className="flex flex-wrap gap-2">
                       {contextFiles.map((file, idx) => (
                         <Badge key={idx} variant="secondary" className="gap-1">
@@ -292,61 +536,141 @@ function ExamCreatorForm({
                     <label className="flex items-center justify-center gap-2 p-4 border border-dashed rounded-lg cursor-pointer hover:bg-muted/50">
                       <FileUp size={18} />
                       <span className="text-sm">Subir arquivos</span>
-                      <input type="file" multiple className="hidden" onChange={handleFileChange} accept=".pdf,image/*" />
+                      <input
+                        type="file"
+                        multiple
+                        className="hidden"
+                        onChange={handleFileChange}
+                        accept=".pdf,image/*"
+                      />
                     </label>
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="topic">Tópico ou Conteúdo</Label>
-                    <Textarea id="topic" value={topic} onChange={(e) => setTopic(e.target.value)} rows={3} />
+                    <LabelWithTooltip
+                      htmlFor="topic"
+                      label="Tópico ou Conteúdo"
+                      required
+                      tooltip="Descreva o assunto da prova (ex.: 'Funções recursivas')."
+                    />
+                    <Textarea
+                      id="topic"
+                      value={topic}
+                      onChange={(e) => {
+                        setTopic(e.target.value);
+                        if (topicError) setTopicError(null);
+                      }}
+                      rows={3}
+                      aria-invalid={!!topicError}
+                    />
+                    {topicError && <p className="text-sm text-destructive">{topicError}</p>}
                   </div>
-                  <Button type="button" variant="outline" className="w-full" disabled={aiGenerating} onClick={handleGenerateAI}>
-                    {aiGenerating ? <Loader2 className="animate-spin mr-2" size={18} /> : <Wand2 className="mr-2" size={18} />}
-                    Gerar com IA
+                  <Button
+                    type="button"
+                    variant={hasGeneratedWithAI ? "secondary" : "outline"}
+                    className="w-full"
+                    disabled={aiGenerating}
+                    onClick={handleGenerateAI}
+                  >
+                    {aiGenerating ? (
+                      <Loader2 className="animate-spin mr-2" size={18} />
+                    ) : (
+                      <Wand2 className="mr-2" size={18} />
+                    )}
+                    {hasGeneratedWithAI ? "Gerar novamente" : "Gerar com IA"}
                   </Button>
                 </div>
               </div>
-              <Button type="submit" className="w-full">Próximo Passo</Button>
             </form>
-          ) : (
-            <div className="space-y-6">
-              <h3 className="font-semibold">Conferir Gabarito</h3>
-              <div className="grid md:grid-cols-2 gap-4 max-h-[480px] overflow-y-auto">
-                {answerKey.map((ans, idx) => (
-                  <div key={idx} className="p-4 border rounded-lg space-y-2">
-                    <span className="text-xs text-muted-foreground font-medium">Questão {idx + 1}</span>
-                    {questions[idx] && <p className="text-sm line-clamp-2">{questions[idx].text}</p>}
-                    <div className="flex gap-1">
-                      {ALPHABET.slice(0, form.getValues("alternativesPerQuestion")).map((letter) => (
-                        <Button
-                          key={letter}
-                          type="button"
-                          size="sm"
-                          variant={ans === letter ? "default" : "outline"}
-                          className="flex-1"
-                          onClick={() => {
-                            const newKey = [...answerKey];
-                            newKey[idx] = letter;
-                            setAnswerKey(newKey);
-                          }}
-                        >
-                          {letter}
-                        </Button>
-                      ))}
+          </CardContent>
+        </Card>
+      ) : (
+        <>
+          <Card className="py-0">
+            <CardHeader className="gap-1 p-4">
+              <CardTitle>Conferir Gabarito</CardTitle>
+              <p className="text-sm text-muted-foreground">Marque a alternativa correta de cada questão.</p>
+            </CardHeader>
+          </Card>
+
+          <Card className="overflow-visible py-0">
+            <CardContent className="space-y-6 p-4">
+              <div className="space-y-6">
+                {answerKey.map((ans, idx) => {
+                  const altCount = form.getValues("alternativesPerQuestion");
+                  const letters = ALPHABET.slice(0, altCount);
+                  return (
+                    <div key={idx} className="space-y-3 pb-6 border-b last:border-b-0 last:pb-0">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs text-muted-foreground font-medium">Questão {idx + 1}</span>
+                        <AlertDialog>
+                          <Tooltip>
+                            <AlertDialogTrigger
+                              render={
+                                <TooltipTrigger
+                                  render={
+                                    <Button
+                                      type="button"
+                                      variant="ghost"
+                                      size="icon"
+                                      className="size-8 shrink-0 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                                      aria-label={`Excluir questão ${idx + 1}`}
+                                    >
+                                      <Trash2 size={16} />
+                                    </Button>
+                                  }
+                                />
+                              }
+                            />
+                            <TooltipContent side="top">Excluir questão</TooltipContent>
+                          </Tooltip>
+                          <AlertDialogContent>
+                            <AlertDialogHeader>
+                              <AlertDialogTitle>Excluir questão {idx + 1}?</AlertDialogTitle>
+                              <AlertDialogDescription>
+                                Esta questão será removida da prova. A numeração das demais será ajustada.
+                              </AlertDialogDescription>
+                            </AlertDialogHeader>
+                            <AlertDialogFooter>
+                              <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                              <AlertDialogAction variant="destructive" onClick={() => handleRemoveQuestion(idx)}>
+                                Excluir
+                              </AlertDialogAction>
+                            </AlertDialogFooter>
+                          </AlertDialogContent>
+                        </AlertDialog>
+                      </div>
+                      {questions[idx] && <p className="text-sm font-medium leading-relaxed">{questions[idx].text}</p>}
+                      <RadioGroup
+                        value={ans}
+                        onValueChange={(letter) => {
+                          const newKey = [...answerKey];
+                          newKey[idx] = letter;
+                          setAnswerKey(newKey);
+                        }}
+                        className="gap-2"
+                      >
+                        {letters.map((letter, optIdx) => {
+                          const optionId = `exam-q${idx}-opt${optIdx}`;
+                          const optionText = questions[idx]?.options?.[optIdx];
+                          return (
+                            <div key={letter} className="flex items-start gap-3 py-1">
+                              <RadioGroupItem value={letter} id={optionId} className="mt-0.5" />
+                              <Label htmlFor={optionId} className="flex-1 cursor-pointer font-normal leading-snug">
+                                <span className="font-medium">{letter}</span>
+                                {optionText ? <span className="text-muted-foreground"> — {optionText}</span> : null}
+                              </Label>
+                            </div>
+                          );
+                        })}
+                      </RadioGroup>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
-              <div className="flex gap-4">
-                <Button variant="outline" className="flex-1" onClick={() => setStep(1)}>Voltar</Button>
-                <Button className="flex-[2]" disabled={loading} onClick={saveExam}>
-                  {loading ? <Loader2 className="animate-spin mr-2" /> : <Save className="mr-2" size={18} />}
-                  Salvar Atividade
-                </Button>
-              </div>
-            </div>
-          )}
-        </CardContent>
-      </Card>
+            </CardContent>
+          </Card>
+        </>
+      )}
     </div>
   );
 }
