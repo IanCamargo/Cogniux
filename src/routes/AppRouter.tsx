@@ -6,6 +6,8 @@ import { Dashboard } from "@/components/Dashboard";
 import { ExamCreator } from "@/components/ExamCreator";
 import { ExamDetail } from "@/components/ExamDetail";
 import { OnlineExam } from "@/components/OnlineExam";
+import { ProfilePage } from "@/pages/ProfilePage";
+import { SeedPage } from "@/pages/SeedPage";
 import { useAuth } from "@/hooks/useAuth";
 
 export function AppRouter() {
@@ -20,9 +22,12 @@ export function AppRouter() {
       <Route element={<ProtectedRoute />}>
         <Route element={<ProfessorLayout />}>
           <Route path="/dashboard" element={<Dashboard />} />
-          <Route path="/exam/create" element={user ? <ExamCreator user={user} /> : null} />
-          <Route path="/exam/:id/edit" element={user ? <ExamCreator user={user} /> : null} />
-          <Route path="/exam/:id" element={<ExamDetail />} />
+          <Route path="/exam/create" element={<ExamCreator user={user!} />} />
+          <Route path="/exam/:id/edit" element={<ExamCreator user={user!} />} />
+          <Route path="/exam/:id" element={<Navigate to="overview" replace />} />
+          <Route path="/exam/:id/:tab" element={<ExamDetail />} />
+          <Route path="/profile" element={<ProfilePage />} />
+          <Route path="/seed" element={<SeedPage />} />
         </Route>
       </Route>
 

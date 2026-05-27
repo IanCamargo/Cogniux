@@ -19,18 +19,21 @@ export function useFirestoreCollectionQuery<T>(
   const selectRef = useRef(select);
   selectRef.current = select;
 
+  const queryKeyRef = useRef(queryKey);
+  queryKeyRef.current = queryKey;
+
   useEffect(() => {
     if (!firestoreQuery) return;
     return onSnapshot(
       firestoreQuery,
       (snap) => {
-        queryClient.setQueryData(queryKey, selectRef.current(snap));
+        queryClient.setQueryData(queryKeyRef.current, selectRef.current(snap));
       },
       (error) => {
         console.error("Firestore onSnapshot error:", error);
       }
     );
-  }, [queryClient, firestoreQuery, queryKey]);
+  }, [queryClient, firestoreQuery]);
 
   const query = useQuery({
     queryKey,

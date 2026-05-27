@@ -42,9 +42,9 @@ import { toast } from "sonner";
 const step1Schema = z.object({
   subject: z.string().trim().min(1, "Matéria é obrigatória."),
   semester: z.string().trim().min(1, "Semestre é obrigatório."),
-  course: z.string().optional(),
-  className: z.string().optional(),
-  unit: z.string().optional(),
+  course: z.string().trim().min(1, "Curso é obrigatório."),
+  className: z.string().trim().min(1, "Turma é obrigatória."),
+  unit: z.string().trim().min(1, "Unidade é obrigatória."),
   numQuestions: z
     .number({
       invalid_type_error: "Informe a quantidade de questões.",
@@ -64,9 +64,9 @@ const aiGenerationSchema = step1Schema.extend({
 interface Step1FormValues {
   subject: string;
   semester: string;
-  course?: string;
-  className?: string;
-  unit?: string;
+  course: string;
+  className: string;
+  unit: string;
   numQuestions: number;
   alternativesPerQuestion: number;
   isOnline: boolean;
@@ -152,7 +152,7 @@ const defaultFormValues: Step1FormValues = {
   unit: "",
   numQuestions: 10,
   alternativesPerQuestion: 5,
-  isOnline: false,
+  isOnline: true,
 };
 
 interface ExamCreatorProps {
@@ -173,7 +173,158 @@ export function ExamCreator({ user }: ExamCreatorProps) {
     return <Skeleton className="h-64 w-full" />;
   }
 
-  return <ExamCreatorForm key={editId ?? "new"} user={user} editId={editId} existingExam={existingExam ?? null} />;
+  if (editId) {
+    return <ExamEditForm user={user} editId={editId} existingExam={existingExam ?? null} />;
+  }
+
+  return <ExamCreatorForm key="new" user={user} editId={undefined} existingExam={null} />;
+}
+
+function ExamEditForm({
+  user,
+  editId,
+  existingExam,
+}: {
+  user: User;
+  editId: string;
+  existingExam: Exam | null;
+}) {
+  const navigate = useNavigate();
+  const [loading, setLoading] = useState(false);
+
+  const form = useForm<Step1FormValues>({
+    resolver: zodResolver(step1Schema),
+    defaultValues: existingExam
+      ? {
+          subject: existingExam.subject,
+          semester: existingExam.semester,
+          course: existingExam.course ?? "",
+          className: existingExam.className ?? "",
+          unit: existingExam.unit ?? "",
+          numQuestions: existingExam.numQuestions,
+          alternativesPerQuestion: existingExam.alternativesPerQuestion,
+          isOnline: existingExam.isOnline,
+        }
+      : defaultFormValues,
+  });
+
+  const handleSave = form.handleSubmit(async (data) => {
+    setLoading(true);
+    try {
+      await updateDoc(doc(db, "exams", editId), {
+        ...stripUndefined(data),
+        updatedAt: serverTimestamp(),
+      });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.exam(editId), refetchType: "none" });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.exams(user.uid), refetchType: "none" });
+      toast.success("Prova atualizada com sucesso!");
+      navigate(`/exam/${editId}/overview`, { replace: true });
+    } catch (error) {
+      toast.error(getFirestoreErrorMessage(error, getFirebaseConfig().projectId));
+    } finally {
+      setLoading(false);
+    }
+  });
+
+  return (
+    <div className="mx-auto w-full max-w-2xl space-y-4 pb-12">
+      <div className="flex items-center justify-between gap-2">
+        <Button variant="ghost" onClick={() => navigate(`/exam/${editId}/overview`)}>
+          <ArrowLeft className="mr-2" size={18} /> Voltar
+        </Button>
+        <Button onClick={() => void handleSave()} disabled={loading}>
+          {loading && <Loader2 className="animate-spin mr-2" size={18} />}
+          Salvar
+        </Button>
+      </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Editar Atividade</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={(e) => { e.preventDefault(); void handleSave(); }} className="space-y-4">
+            <div className="space-y-2">
+              <FieldLabel htmlFor="subject" required>Matéria / UC</FieldLabel>
+              <Input id="subject" {...form.register("subject")} placeholder="Ex: Algoritmos II" />
+              {form.formState.errors.subject && (
+                <p className="text-sm text-destructive">{form.formState.errors.subject.message}</p>
+              )}
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <FieldLabel htmlFor="semester" required>Semestre</FieldLabel>
+                <Input id="semester" placeholder="Ex: 2025.1" {...form.register("semester")} />
+                {form.formState.errors.semester && (
+                  <p className="text-sm text-destructive">{form.formState.errors.semester.message}</p>
+                )}
+              </div>
+              <div className="space-y-2">
+                <FieldLabel htmlFor="course" required>Curso</FieldLabel>
+                <Input id="course" placeholder="Ex: Análise e Desenvolvimento" {...form.register("course")} />
+                {form.formState.errors.course && (
+                  <p className="text-sm text-destructive">{form.formState.errors.course.message}</p>
+                )}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <FieldLabel htmlFor="className" required>Turma</FieldLabel>
+                <Input id="className" placeholder="Ex: ADS-3A" {...form.register("className")} />
+                {form.formState.errors.className && (
+                  <p className="text-sm text-destructive">{form.formState.errors.className.message}</p>
+                )}
+              </div>
+              <div className="space-y-2">
+                <FieldLabel htmlFor="unit" required>Unidade</FieldLabel>
+                <Input id="unit" placeholder="Ex: I" {...form.register("unit")} />
+                {form.formState.errors.unit && (
+                  <p className="text-sm text-destructive">{form.formState.errors.unit.message}</p>
+                )}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <FieldLabel htmlFor="numQuestions" required>Qtd. Questões</FieldLabel>
+                <Input
+                  id="numQuestions"
+                  type="number"
+                  {...form.register("numQuestions", { valueAsNumber: true })}
+                />
+                {form.formState.errors.numQuestions && (
+                  <p className="text-sm text-destructive">{form.formState.errors.numQuestions.message}</p>
+                )}
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="alternatives">Alternativas</Label>
+                <Controller
+                  name="alternativesPerQuestion"
+                  control={form.control}
+                  render={({ field }) => (
+                    <Select value={field.value} onValueChange={(value) => field.onChange(value)}>
+                      <SelectTrigger id="alternatives" className="w-full">
+                        <SelectValue placeholder="Selecione" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {[2, 3, 4, 5].map((n) => (
+                          <SelectItem key={n} value={n}>{n}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                />
+              </div>
+            </div>
+
+            <button type="submit" className="hidden" />
+          </form>
+        </CardContent>
+      </Card>
+    </div>
+  );
 }
 
 function ExamCreatorForm({
@@ -424,18 +575,27 @@ function ExamCreatorForm({
                   </div>
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-2">
-                      <Label htmlFor="course">Curso</Label>
-                      <Input id="course" {...form.register("course")} />
+                      <FieldLabel htmlFor="course" required>Curso</FieldLabel>
+                      <Input id="course" placeholder="Ex: Análise e Desenvolvimento" {...form.register("course")} />
+                      {form.formState.errors.course && (
+                        <p className="text-sm text-destructive">{form.formState.errors.course.message}</p>
+                      )}
                     </div>
                     <div className="space-y-2">
-                      <Label htmlFor="className">Turma</Label>
-                      <Input id="className" {...form.register("className")} />
+                      <FieldLabel htmlFor="className" required>Turma</FieldLabel>
+                      <Input id="className" placeholder="Ex: ADS-3A" {...form.register("className")} />
+                      {form.formState.errors.className && (
+                        <p className="text-sm text-destructive">{form.formState.errors.className.message}</p>
+                      )}
                     </div>
                   </div>
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-2">
-                      <Label htmlFor="unit">Unidade</Label>
-                      <Input id="unit" {...form.register("unit")} />
+                      <FieldLabel htmlFor="unit" required>Unidade</FieldLabel>
+                      <Input id="unit" placeholder="Ex: I" {...form.register("unit")} />
+                      {form.formState.errors.unit && (
+                        <p className="text-sm text-destructive">{form.formState.errors.unit.message}</p>
+                      )}
                     </div>
                     <div className="space-y-2">
                       <FieldLabel htmlFor="semester" required>
@@ -443,6 +603,7 @@ function ExamCreatorForm({
                       </FieldLabel>
                       <Input
                         id="semester"
+                        placeholder="Ex: 2025.1"
                         aria-invalid={!!form.formState.errors.semester}
                         {...form.register("semester")}
                       />

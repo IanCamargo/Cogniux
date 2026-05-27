@@ -18,12 +18,15 @@ export function useFirestoreDocQuery<T>(
   const selectRef = useRef(select);
   selectRef.current = select;
 
+  const queryKeyRef = useRef(queryKey);
+  queryKeyRef.current = queryKey;
+
   useEffect(() => {
     if (!docRef) return;
     return onSnapshot(docRef, (snap) => {
-      queryClient.setQueryData(queryKey, selectRef.current(snap));
+      queryClient.setQueryData(queryKeyRef.current, selectRef.current(snap));
     });
-  }, [queryClient, docRef, queryKey]);
+  }, [queryClient, docRef]);
 
   const query = useQuery({
     queryKey,

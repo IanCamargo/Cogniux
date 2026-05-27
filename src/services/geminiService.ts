@@ -1,6 +1,7 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { parseJsonResponse } from "@/lib/gemini";
 import { withRetry } from "@/lib/retry";
+import { getGeminiApiKey } from "@/lib/env";
 import {
   GEMINI_MODEL,
   SYSTEM_INSTRUCTIONS,
@@ -30,7 +31,7 @@ let aiClient: GoogleGenAI | null = null;
 
 function getAI(): GoogleGenAI {
   if (!aiClient) {
-    aiClient = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY ?? "" });
+    aiClient = new GoogleGenAI({ apiKey: getGeminiApiKey() });
   }
   return aiClient;
 }

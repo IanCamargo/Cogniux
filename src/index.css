@@ -3,25 +3,9 @@
 @import "shadcn/tailwind.css";
 @import "@fontsource-variable/geist";
 
-@media print {
-  .no-print {
-    display: none !important;
-  }
-  body {
-    background: white !important;
-    color: black !important;
-    padding: 0 !important;
-  }
-  .print-only {
-    display: block !important;
-  }
-  .page-break {
-    page-break-before: always;
-  }
-}
-
-.print-only {
-  display: none;
+@page {
+  size: A4;
+  margin: 0;
 }
 
 @import "tailwindcss";

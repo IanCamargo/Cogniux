@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { doc, collection, addDoc, updateDoc, serverTimestamp } from "firebase/firestore";
+import { doc, collection, writeBatch, serverTimestamp } from "firebase/firestore";
 import { CheckCircle2, Loader2, ArrowRight, ArrowLeft, Send, BrainCircuit, AlertCircle, Sun, Moon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -82,7 +82,7 @@ function OnlineExamContent({
   initialAnswers: string[];
 }) {
   const navigate = useNavigate();
-  const { isDark, toggle } = useTheme();
+  const { theme, setTheme } = useTheme();
   const [studentName, setStudentName] = useState(initialStudentName);
   const [answers, setAnswers] = useState<string[]>(initialAnswers);
   const [step, setStep] = useState<OnlineExamStep>(initialStep);
@@ -99,8 +99,10 @@ function OnlineExamContent({
     setSubmitting(true);
     try {
       const score = calculateScore(answers, exam.answerKey);
+      const batch = writeBatch(db);
 
-      await addDoc(collection(db, "exams", examId, "submissions"), {
+      const subRef = doc(collection(db, "exams", examId, "submissions"));
+      batch.set(subRef, {
         studentName,
         answers,
         score,
@@ -110,12 +112,13 @@ function OnlineExamContent({
       });
 
       if (accessToken) {
-        await updateDoc(doc(db, "access_tokens", accessToken), {
+        batch.update(doc(db, "access_tokens", accessToken), {
           isUsed: true,
           usedAt: serverTimestamp(),
         });
       }
 
+      await batch.commit();
       setStep("finished");
     } catch {
       toast.error("Erro ao enviar respostas.");
@@ -138,8 +141,8 @@ function OnlineExamContent({
 
   return (
     <div className="min-h-screen bg-background" onKeyDown={handleKeyDown} tabIndex={0}>
-      <Button variant="outline" size="icon" className="fixed top-4 right-4 z-50" onClick={toggle} aria-label="Alternar tema">
-        {isDark ? <Sun size={18} /> : <Moon size={18} />}
+      <Button variant="outline" size="icon" className="fixed top-4 right-4 z-50" onClick={() => setTheme(theme === "dark" ? "light" : "dark")} aria-label="Alternar tema">
+        {theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}
       </Button>
 
       <div className="container max-w-3xl py-16 md:py-8">

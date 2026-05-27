@@ -33,6 +33,9 @@ async function fetchOnlineSession(
     const tSnap = await getDoc(doc(db, "access_tokens", accessToken));
     if (tSnap.exists()) {
       const tData = tSnap.data();
+      if (tData.examId !== examId) {
+        return { ...EMPTY_SESSION, error: "Token inválido para esta atividade." };
+      }
       if (tData.isUsed) {
         return { ...EMPTY_SESSION, error: "Este código de acesso já foi utilizado." };
       }

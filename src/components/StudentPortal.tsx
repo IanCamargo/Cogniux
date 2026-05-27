@@ -18,7 +18,7 @@ export function StudentPortal() {
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
   const { login } = useAuth();
-  const { isDark, toggle } = useTheme();
+  const { theme, setTheme } = useTheme();
 
   const handleEnterExam = async () => {
     try {
@@ -36,7 +36,7 @@ export function StudentPortal() {
         return;
       }
 
-      navigate(`/online/${normalized}`);
+      navigate(`/online/${code.trim()}`);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Erro ao verificar código.");
     } finally {
@@ -44,12 +44,12 @@ export function StudentPortal() {
     }
   };
 
-  const handleProfessorLogin = async (provider: "google" | "microsoft") => {
+  const handleProfessorLogin = async () => {
     try {
-      await login(provider);
+      await login();
       navigate("/dashboard");
     } catch {
-      toast.error(`Falha na autenticação com ${provider}.`);
+      toast.error("Falha na autenticação com Google.");
     }
   };
 
@@ -59,10 +59,10 @@ export function StudentPortal() {
         variant="outline"
         size="icon"
         className="fixed top-4 right-4"
-        onClick={toggle}
-        aria-label={isDark ? "Tema claro" : "Tema escuro"}
+        onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+        aria-label={theme === "dark" ? "Tema claro" : "Tema escuro"}
       >
-        {isDark ? <Sun size={18} /> : <Moon size={18} />}
+        {theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}
       </Button>
 
       <div className="container max-w-md space-y-8 py-6">
@@ -87,9 +87,9 @@ export function StudentPortal() {
               <Input
                 id="exam-code"
                 placeholder="Cole o código aqui..."
-                className="text-center text-lg font-mono uppercase"
+                className="text-center text-lg font-mono"
                 value={code}
-                onChange={(e) => setCode(e.target.value.toUpperCase())}
+                onChange={(e) => setCode(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && code.trim() && handleEnterExam()}
               />
             </div>
@@ -107,15 +107,10 @@ export function StudentPortal() {
             <p className="text-xs text-muted-foreground text-center uppercase tracking-widest font-medium">
               Acesso do Professor
             </p>
-            <div className="grid grid-cols-2 gap-3">
-              <Button variant="outline" onClick={() => handleProfessorLogin("google")}>
-                <LogIn className="mr-2" size={16} />
-                Google
-              </Button>
-              <Button variant="outline" onClick={() => handleProfessorLogin("microsoft")}>
-                Outlook
-              </Button>
-            </div>
+            <Button variant="outline" className="w-full" onClick={handleProfessorLogin}>
+              <LogIn className="mr-2" size={16} />
+              Entrar com Google
+            </Button>
           </CardContent>
         </Card>
       </div>

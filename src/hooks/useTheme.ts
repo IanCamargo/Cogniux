@@ -1,18 +1,22 @@
-import { useCallback, useState } from "react";
-import { applyTheme, getStoredTheme } from "@/lib/theme";
+import { useCallback, useEffect, useState } from "react";
+import { applyTheme, getStoredTheme, type Theme } from "@/lib/theme";
 
 export function useTheme() {
-  const [isDark, setIsDarkState] = useState(getStoredTheme);
+  const [theme, setThemeState] = useState<Theme>(getStoredTheme);
 
-  const setIsDark = useCallback((value: boolean | ((prev: boolean) => boolean)) => {
-    setIsDarkState((prev) => {
-      const next = typeof value === "function" ? value(prev) : value;
-      applyTheme(next);
-      return next;
-    });
+  const setTheme = useCallback((value: Theme) => {
+    setThemeState(value);
+    applyTheme(value);
   }, []);
 
-  const toggle = useCallback(() => setIsDark((v) => !v), [setIsDark]);
+  useEffect(() => {
+    applyTheme(theme);
+    if (theme !== "system") return;
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    const handler = () => applyTheme("system");
+    mq.addEventListener("change", handler);
+    return () => mq.removeEventListener("change", handler);
+  }, [theme]);
 
-  return { isDark, setIsDark, toggle };
+  return { theme, setTheme };
 }
