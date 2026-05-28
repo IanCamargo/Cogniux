@@ -1,322 +1,390 @@
-import { useState, useEffect } from "react";
-import { db } from "../lib/firebase";
-import { doc, getDoc, collection, addDoc, updateDoc, serverTimestamp } from "firebase/firestore";
-import { motion, AnimatePresence } from "motion/react";
-import { CheckCircle2, Loader2, ArrowRight, ArrowLeft, Send, BrainCircuit, AlertCircle, Sun, Moon, Key } from "lucide-react";
-import { cn } from "../lib/utils";
+import { useState } from "react";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { doc, collection, writeBatch, serverTimestamp } from "firebase/firestore";
+import { CheckCircle2, Loader2, ArrowRight, ArrowLeft, Send, BrainCircuit, AlertCircle, Sun, Moon, Maximize, Minimize, Info } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Progress } from "@/components/ui/progress";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { db } from "@/lib/firebase";
+import { calculateScore } from "@/lib/grading";
+import { useTheme } from "@/hooks/useTheme";
+import { useOnlineExamSession, type OnlineExamStep } from "@/hooks/useOnlineExamSession";
+import type { Exam } from "@/types";
+import { toast } from "sonner";
 
-interface OnlineExamProps {
-  examId: string;
-  accessToken?: string;
-  onFinished: () => void;
-  isDark: boolean;
-  setIsDark: (v: boolean) => void;
+export function OnlineExam() {
+  const { examId } = useParams<{ examId: string }>();
+  const [searchParams] = useSearchParams();
+  const accessToken = searchParams.get("token") ?? undefined;
+  const { session, loading } = useOnlineExamSession(examId, accessToken);
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <Loader2 className="animate-spin" size={40} />
+      </div>
+    );
+  }
+
+  if (session.error) {
+    return <OnlineExamError message={session.error} />;
+  }
+
+  if (!session.exam || !examId) return null;
+
+  return (
+    <OnlineExamContent
+      key={`${examId}-${accessToken ?? "open"}`}
+      examId={examId}
+      exam={session.exam}
+      accessToken={accessToken}
+      initialStudentName={session.studentName}
+      initialStep={session.initialStep}
+      initialAnswers={session.answers}
+    />
+  );
 }
 
-export function OnlineExam({ examId, accessToken, onFinished, isDark, setIsDark }: OnlineExamProps) {
-  const [exam, setExam] = useState<any>(null);
-  const [studentName, setStudentName] = useState("");
-  const [answers, setAnswers] = useState<string[]>([]);
-  const [step, setStep] = useState<"name" | "exam" | "finished">("name");
+function OnlineExamError({ message }: { message: string }) {
+  const navigate = useNavigate();
+  return (
+    <div className="min-h-screen flex flex-col items-center justify-center">
+      <div className="container max-w-md">
+        <Alert variant="destructive">
+        <AlertCircle className="h-4 w-4" />
+        <AlertTitle>Ops!</AlertTitle>
+        <AlertDescription className="space-y-4">
+          <p>{message}</p>
+          <Button variant="outline" onClick={() => navigate("/portal")}>Voltar ao Portal</Button>
+        </AlertDescription>
+      </Alert>
+      </div>
+    </div>
+  );
+}
+
+function OnlineExamContent({
+  examId,
+  exam,
+  accessToken,
+  initialStudentName,
+  initialStep,
+  initialAnswers,
+}: {
+  examId: string;
+  exam: Exam;
+  accessToken?: string;
+  initialStudentName: string;
+  initialStep: OnlineExamStep;
+  initialAnswers: string[];
+}) {
+  const navigate = useNavigate();
+  const { theme, setTheme } = useTheme();
+  const [studentName, setStudentName] = useState(initialStudentName);
+  const [answers, setAnswers] = useState<string[]>(initialAnswers);
+  const [step, setStep] = useState<OnlineExamStep>(initialStep);
   const [currentQuestion, setCurrentQuestion] = useState(0);
-  const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [, setFocusedOption] = useState<number | null>(null);
 
-  useEffect(() => {
-    const fetchExamAndToken = async () => {
-      try {
-        // 1. Fetch Token if present
-        if (accessToken) {
-          const tSnap = await getDoc(doc(db, "access_tokens", accessToken));
-          if (tSnap.exists()) {
-            const tData = tSnap.data();
-            if (tData.studentName) {
-              setStudentName(tData.studentName);
-              setStep("exam"); // Skip name step if pre-filled
-            }
-          }
-        }
-
-        // 2. Fetch Exam
-        const docSnap = await getDoc(doc(db, "exams", examId));
-        if (docSnap.exists()) {
-          const data = docSnap.data();
-          if (!data.isOnline) {
-            setError("Esta atividade não está habilitada para aplicação online.");
-          } else {
-            setExam({ id: docSnap.id, ...data });
-            setAnswers(new Array(data.numQuestions).fill(""));
-          }
-        } else {
-          setError("Atividade não encontrada.");
-        }
-      } catch (e) {
-        console.error(e);
-        setError("Erro ao carregar atividade.");
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchExamAndToken();
-  }, [examId, accessToken]);
+  const ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
 
   const handleSubmit = async () => {
-    if (answers.includes("")) return alert("Por favor, responda todas as questões!");
+    if (answers.includes("")) {
+      toast.error("Por favor, responda todas as questões.");
+      return;
+    }
     setSubmitting(true);
     try {
-      let correct = 0;
-      answers.forEach((ans, idx) => {
-        if (ans === exam.answerKey[idx]) correct++;
-      });
-      const score = (correct / exam.numQuestions) * 10;
+      const score = calculateScore(answers, exam.answerKey);
+      const batch = writeBatch(db);
 
-      // 1. Add Submission
-      await addDoc(collection(db, "exams", examId, "submissions"), {
+      const subRef = doc(collection(db, "exams", examId, "submissions"));
+      batch.set(subRef, {
         studentName,
         answers,
         score,
         gradedAt: serverTimestamp(),
         isOnline: true,
-        accessToken: accessToken || null
+        accessToken: accessToken ?? null,
       });
 
-      // 2. Mark Token as used
       if (accessToken) {
-        await updateDoc(doc(db, "access_tokens", accessToken), {
+        batch.update(doc(db, "access_tokens", accessToken), {
           isUsed: true,
-          usedAt: serverTimestamp()
+          usedAt: serverTimestamp(),
         });
       }
 
+      await batch.commit();
       setStep("finished");
-    } catch (e) {
-      console.error(e);
-      alert("Erro ao enviar respostas.");
+    } catch {
+      toast.error("Erro ao enviar respostas.");
     } finally {
       setSubmitting(false);
     }
   };
 
-  if (loading) return (
-    <div className="min-h-screen flex items-center justify-center">
-      <Loader2 className="animate-spin text-indigo-600" size={40} />
-    </div>
-  );
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (step !== "exam") return;
 
-  if (error) return (
-    <div className="min-h-screen flex flex-col items-center justify-center p-6 text-center">
-      <AlertCircle className="text-rose-500 mb-4" size={64} />
-      <h2 className="text-2xl font-black text-slate-900 dark:text-white mb-2">Ops!</h2>
-      <p className="text-slate-500 dark:text-slate-400 mb-8">{error}</p>
-      <button onClick={onFinished} className="px-8 py-3 bg-indigo-600 text-white rounded-xl font-bold">Voltar</button>
-    </div>
-  );
+    const numOptions = exam.alternativesPerQuestion;
+    const currentAnswerIdx = answers[currentQuestion]
+      ? ALPHABET.indexOf(answers[currentQuestion])
+      : -1;
 
-  const ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
+    switch (e.key) {
+      case "Tab":
+        e.preventDefault();
+        break;
+      case "ArrowRight":
+        if (currentQuestion < exam.numQuestions - 1) {
+          e.preventDefault();
+          setCurrentQuestion((p) => p + 1);
+          setFocusedOption(null);
+        }
+        break;
+      case "ArrowLeft":
+        if (currentQuestion > 0) {
+          e.preventDefault();
+          setCurrentQuestion((p) => p - 1);
+          setFocusedOption(null);
+        }
+        break;
+      case "ArrowDown": {
+        e.preventDefault();
+        const next = currentAnswerIdx < numOptions - 1 ? currentAnswerIdx + 1 : 0;
+        const newAns = [...answers];
+        newAns[currentQuestion] = ALPHABET[next];
+        setAnswers(newAns);
+        setFocusedOption(next);
+        break;
+      }
+      case "ArrowUp": {
+        e.preventDefault();
+        const prev = currentAnswerIdx > 0 ? currentAnswerIdx - 1 : numOptions - 1;
+        const newAns = [...answers];
+        newAns[currentQuestion] = ALPHABET[prev];
+        setAnswers(newAns);
+        setFocusedOption(prev);
+        break;
+      }
+      case "Enter":
+        e.preventDefault();
+        if (currentQuestion < exam.numQuestions - 1) {
+          setCurrentQuestion((p) => p + 1);
+        } else if (!answers.includes("")) {
+          setConfirmOpen(true);
+        }
+        break;
+    }
+  };
+
+  const progress = (answers.filter(Boolean).length / exam.numQuestions) * 100;
+
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
+
+  const toggleFullscreen = () => {
+    if (!document.fullscreenElement) {
+      void document.documentElement.requestFullscreen();
+      setIsFullscreen(true);
+    } else {
+      void document.exitFullscreen();
+      setIsFullscreen(false);
+    }
+  };
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 p-4 md:p-8 transition-colors relative">
-      <button 
-        onClick={() => setIsDark(!isDark)}
-        className="fixed top-4 right-4 p-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-slate-500 dark:text-slate-400 z-50 hover:bg-slate-50 dark:hover:bg-slate-800 transition-all"
-      >
-        {isDark ? <Sun size={20} /> : <Moon size={20} />}
-      </button>
-      <AnimatePresence mode="wait">
-        {step === "name" && (
-          <motion.div
-            key="name"
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -20 }}
-            className="max-w-md mx-auto mt-20"
-          >
-            <div className="bg-white dark:bg-slate-900 p-8 rounded-[32px] border border-slate-200 dark:border-slate-800 shadow-xl shadow-slate-200/50 dark:shadow-none space-y-8">
-              <div className="text-center space-y-2">
-                <div className="w-16 h-16 bg-gradient-to-br from-indigo-600 to-violet-600 rounded-2xl flex items-center justify-center mx-auto text-white shadow-lg shadow-indigo-200">
-                  <BrainCircuit size={32} />
-                </div>
-                <h2 className="text-2xl font-display font-black text-slate-900 dark:text-white">Identificação do Aluno</h2>
-                <p className="text-slate-500 dark:text-slate-400 text-sm">Insira seu nome completo para iniciar a atividade.</p>
+    <div className="min-h-screen bg-background outline-none" onKeyDown={handleKeyDown} tabIndex={0}>
+      <div className="fixed top-4 right-4 z-50 flex flex-col gap-2">
+        <Button variant="outline" size="icon" onClick={toggleFullscreen} aria-label="Tela cheia">
+          {isFullscreen ? <Minimize size={18} /> : <Maximize size={18} />}
+        </Button>
+        <Button variant="outline" size="icon" onClick={() => setTheme(theme === "dark" ? "light" : "dark")} aria-label="Alternar tema">
+          {theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}
+        </Button>
+        <Button variant="outline" size="icon" onClick={() => setShortcutsOpen(true)} aria-label="Atalhos de teclado">
+          <Info size={18} />
+        </Button>
+      </div>
+
+      <div className="container max-w-3xl py-16 md:py-8">
+      {step === "name" && (
+        <Card>
+          <CardHeader className="text-center">
+            <BrainCircuit className="mx-auto mb-2" size={32} />
+            <CardTitle>Identificação do Aluno</CardTitle>
+            <CardDescription>Insira seu nome completo para iniciar.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="student-name">Seu Nome</Label>
+              <Input
+                id="student-name"
+                autoFocus
+                placeholder="Ex: João da Silva"
+                value={studentName}
+                onChange={(e) => setStudentName(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && studentName.trim() && setStep("exam")}
+              />
+            </div>
+            <Button className="w-full" disabled={!studentName.trim()} onClick={() => setStep("exam")}>
+              Iniciar Atividade <ArrowRight className="ml-2" size={18} />
+            </Button>
+          </CardContent>
+        </Card>
+      )}
+
+      {step === "exam" && (
+        <Card>
+          <CardHeader className="pb-0">
+            <div className="flex justify-between items-start mb-4">
+              <div>
+                <CardTitle>{exam.subject}</CardTitle>
+                <CardDescription>{exam.course ?? "Avaliação Online"}</CardDescription>
               </div>
-              <div className="space-y-4">
-                <div className="space-y-2">
-                  <label className="text-xs font-black text-slate-400 uppercase tracking-widest px-1">Seu Nome</label>
-                  <input
-                    type="text"
-                    placeholder="Ex: João da Silva"
-                    autoFocus
-                    className="w-full p-4 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl focus:ring-2 focus:ring-indigo-600 outline-none transition-all dark:text-white font-bold"
-                    value={studentName}
-                    onChange={(e) => setStudentName(e.target.value)}
-                    onKeyDown={(e) => e.key === "Enter" && studentName.trim() && setStep("exam")}
-                  />
-                </div>
-                <button
-                  disabled={!studentName.trim()}
-                  onClick={() => setStep("exam")}
-                  className="w-full py-4 bg-indigo-600 hover:bg-black text-white rounded-2xl font-black transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+              <div className="text-right text-sm">
+                <p className="text-muted-foreground">Aluno</p>
+                <p className="font-medium">{studentName}</p>
+              </div>
+            </div>
+            <Progress value={progress} className="rounded-none" />
+          </CardHeader>
+          <CardContent className="pt-6 space-y-6">
+            <div className="grid gap-1" style={{ gridTemplateColumns: `repeat(${exam.numQuestions}, 1fr)` }}>
+              {Array.from({ length: exam.numQuestions }).map((_, i) => (
+                <Button
+                  key={i}
+                  size="sm"
+                  variant={currentQuestion === i ? "default" : answers[i] ? "secondary" : "outline"}
+                  className="h-9 p-0 w-full"
+                  onClick={() => setCurrentQuestion(i)}
+                  aria-label={`Questão ${i + 1}`}
                 >
-                  Iniciar Atividade
-                  <ArrowRight size={20} />
-                </button>
-              </div>
+                  {i + 1}
+                </Button>
+              ))}
             </div>
-          </motion.div>
-        )}
 
-        {step === "exam" && (
-          <motion.div
-            key="exam"
-            initial={{ opacity: 0, scale: 0.98 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.98 }}
-            className="max-w-4xl mx-auto"
-          >
-            <div className="bg-white dark:bg-slate-900 rounded-[40px] border border-slate-200 dark:border-slate-800 shadow-2xl shadow-slate-200/50 dark:shadow-none overflow-hidden">
-              <div className="bg-gradient-to-r from-indigo-600 to-violet-600 p-8 text-white flex justify-between items-center">
-                <div className="space-y-1">
-                  <h3 className="text-2xl font-display font-black leading-none">{exam.subject}</h3>
-                  <p className="text-indigo-200 text-sm font-bold uppercase tracking-widest">{exam.course || exam.unit || "Avaliação Online"}</p>
-                </div>
-                <div className="text-right">
-                  <p className="text-[10px] font-black uppercase opacity-60">Aluno</p>
-                  <p className="font-bold">{studentName}</p>
-                </div>
-              </div>
-
-              <div className="p-8 md:p-12 space-y-10">
-                <div className="flex justify-between items-center bg-slate-50 dark:bg-slate-800/50 p-4 rounded-2xl border border-slate-100 dark:border-slate-800">
-                  <div className="flex gap-1 overflow-x-auto pb-2 no-scrollbar px-2">
-                    {Array.from({ length: exam.numQuestions }).map((_, i) => (
-                      <button
-                        key={i}
-                        onClick={() => setCurrentQuestion(i)}
-                        className={cn(
-                          "w-10 h-10 rounded-xl flex-shrink-0 font-black text-sm transition-all",
-                          currentQuestion === i 
-                            ? "bg-indigo-600 text-white shadow-lg shadow-indigo-100 dark:shadow-none" 
-                            : answers[i] 
-                              ? "bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400" 
-                              : "bg-white dark:bg-slate-800 text-slate-400 dark:text-slate-500 border border-slate-200 dark:border-slate-700"
-                        )}
-                      >
-                        {i + 1}
-                      </button>
-                    ))}
-                  </div>
-                  <div className="pl-4 border-l border-slate-200 dark:border-slate-700 text-right">
-                    <span className="block text-[10px] font-black text-slate-400 uppercase">Progresso</span>
-                    <span className="text-sm font-black text-indigo-600 dark:text-indigo-400">
-                      {answers.filter(a => a).length}/{exam.numQuestions}
-                    </span>
-                  </div>
-                </div>
-
-                <div className="space-y-8 py-4">
-                  <div className="space-y-4">
-                    <span className="px-3 py-1 bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 rounded-full text-xs font-black uppercase tracking-widest">Questão {currentQuestion + 1}</span>
-                    <h4 className="text-xl md:text-2xl font-black text-slate-800 dark:text-slate-100 leading-relaxed">
-                      {exam.questions?.[currentQuestion]?.text || "Marque a alternativa correta abaixo:"}
-                    </h4>
-                  </div>
-
-                  <div className="grid grid-cols-1 gap-3">
-                    {ALPHABET.slice(0, exam.alternativesPerQuestion).map((letter, idx) => (
-                      <button
-                        key={letter}
-                        onClick={() => {
-                          const newAns = [...answers];
-                          newAns[currentQuestion] = letter;
-                          setAnswers(newAns);
-                        }}
-                        className={cn(
-                          "w-full p-5 rounded-[24px] text-left font-bold transition-all border-2 flex items-center gap-4 group",
-                          answers[currentQuestion] === letter
-                            ? "bg-indigo-50 dark:bg-indigo-900/20 border-indigo-600 text-indigo-900 dark:text-indigo-100"
-                            : "bg-white dark:bg-slate-900 border-slate-100 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:border-indigo-200 dark:hover:border-indigo-800"
-                        )}
-                      >
-                        <span className={cn(
-                          "w-10 h-10 rounded-xl flex items-center justify-center font-black group-hover:scale-110 transition-transform flex-shrink-0",
-                          answers[currentQuestion] === letter
-                            ? "bg-indigo-600 text-white"
-                            : "bg-slate-100 dark:bg-slate-800 text-slate-400"
-                        )}>
-                          {letter}
-                        </span>
-                        <div className="flex-1">
-                           {exam.questions?.[currentQuestion]?.options?.[idx] || `Alternativa ${letter}`}
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="flex flex-col sm:flex-row gap-4 pt-8">
-                  <button
-                    disabled={currentQuestion === 0}
-                    onClick={() => setCurrentQuestion(prev => prev - 1)}
-                    className="flex-1 py-4 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 rounded-2xl font-black flex items-center justify-center gap-2 disabled:opacity-30"
+            <div className="space-y-4">
+              <p className="text-lg font-medium leading-relaxed">
+                {exam.questions?.[currentQuestion]?.text ?? "Marque a alternativa correta:"}
+              </p>
+              <div className="grid gap-2">
+                {ALPHABET.slice(0, exam.alternativesPerQuestion).map((letter, idx) => (
+                  <Button
+                    key={letter}
+                    variant={answers[currentQuestion] === letter ? "default" : "outline"}
+                    className="justify-start h-auto py-3 px-4 text-left"
+                    onClick={() => {
+                      const newAns = [...answers];
+                      newAns[currentQuestion] = letter;
+                      setAnswers(newAns);
+                      setFocusedOption(idx);
+                    }}
                   >
-                    <ArrowLeft size={20} />
-                    Anterior
-                  </button>
-                  {currentQuestion < exam.numQuestions - 1 ? (
-                    <button
-                      onClick={() => setCurrentQuestion(prev => prev + 1)}
-                      className="flex-1 py-4 bg-indigo-600 text-white rounded-2xl font-black flex items-center justify-center gap-2 hover:bg-black transition-all"
-                    >
-                      Próxima
-                      <ArrowRight size={20} />
-                    </button>
-                  ) : (
-                    <button
-                      onClick={handleSubmit}
-                      disabled={submitting || answers.includes("")}
-                      className="flex-1 py-4 bg-emerald-600 text-white rounded-2xl font-black flex items-center justify-center gap-2 hover:bg-emerald-700 transition-all disabled:opacity-50"
-                    >
-                      {submitting ? <Loader2 className="animate-spin" /> : <Send size={20} />}
-                      {submitting ? "Enviando..." : "Finalizar Entrega"}
-                    </button>
-                  )}
-                </div>
+                    <span className="font-bold mr-2 shrink-0">{letter})</span>
+                    <span className="whitespace-normal break-words text-left">{exam.questions?.[currentQuestion]?.options?.[idx]}</span>
+                  </Button>
+                ))}
               </div>
             </div>
-          </motion.div>
-        )}
 
-        {step === "finished" && (
-          <motion.div
-            key="finished"
-            initial={{ opacity: 0, scale: 0.9 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="max-w-md mx-auto mt-20 text-center"
-          >
-            <div className="bg-white dark:bg-slate-900 p-12 rounded-[40px] border border-slate-200 dark:border-slate-800 shadow-2xl space-y-8">
-              <div className="w-24 h-24 bg-emerald-100 dark:bg-emerald-900/30 text-emerald-500 rounded-full flex items-center justify-center mx-auto shadow-inner">
-                <CheckCircle2 size={48} />
-              </div>
-              <div className="space-y-2">
-                <h2 className="text-3xl font-display font-black text-slate-900 dark:text-white">Recebido!</h2>
-                <p className="text-slate-500 dark:text-slate-400 font-medium">Sua atividade foi enviada com sucesso para o professor.</p>
-              </div>
-              <div className="p-6 bg-slate-50 dark:bg-slate-800/50 rounded-3xl border border-slate-100 dark:border-slate-700">
-                <p className="text-xs font-black text-slate-400 uppercase tracking-widest mb-1">Status</p>
-                <p className="text-emerald-600 dark:text-emerald-400 font-black">ENTREGA FINALIZADA</p>
-              </div>
-              <button 
-                onClick={onFinished}
-                className="w-full py-4 bg-slate-900 dark:bg-slate-800 text-white rounded-2xl font-black"
-              >
-                Sair
-              </button>
+            <div className="flex gap-3 pt-4">
+              <Button variant="outline" className="flex-1" disabled={currentQuestion === 0} onClick={() => setCurrentQuestion((p) => p - 1)}>
+                <ArrowLeft className="mr-2" size={18} /> Anterior
+              </Button>
+              {currentQuestion < exam.numQuestions - 1 ? (
+                <Button className="flex-1" onClick={() => setCurrentQuestion((p) => p + 1)}>
+                  Próxima <ArrowRight className="ml-2" size={18} />
+                </Button>
+              ) : (
+                <Button className="flex-1" disabled={submitting || answers.includes("")} onClick={() => setConfirmOpen(true)}>
+                  <Send className="mr-2" size={18} />
+                  Finalizar
+                </Button>
+              )}
             </div>
-            <p className="mt-8 text-slate-400 text-[10px] font-black uppercase tracking-[0.3em]">Cogniux AI Online</p>
-          </motion.div>
-        )}
-      </AnimatePresence>
+          </CardContent>
+        </Card>
+      )}
+
+      <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Enviar respostas?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {answers.filter(Boolean).length} de {exam?.numQuestions} questões respondidas. Após o envio não será possível alterar.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={submitting}>Voltar</AlertDialogCancel>
+            <AlertDialogAction disabled={submitting} onClick={() => void handleSubmit()}>
+              {submitting ? <Loader2 className="animate-spin mr-2" size={16} /> : null}
+              Confirmar envio
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <Dialog open={shortcutsOpen} onOpenChange={setShortcutsOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Atalhos de Teclado</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 text-sm">
+            <div className="flex items-center justify-between">
+              <span className="text-muted-foreground">Selecionar alternativa</span>
+              <div className="flex gap-1">
+                <kbd className="font-mono rounded border px-1.5 py-0.5 text-xs bg-muted">↑</kbd>
+                <kbd className="font-mono rounded border px-1.5 py-0.5 text-xs bg-muted">↓</kbd>
+              </div>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-muted-foreground">Navegar entre questões</span>
+              <div className="flex gap-1">
+                <kbd className="font-mono rounded border px-1.5 py-0.5 text-xs bg-muted">←</kbd>
+                <kbd className="font-mono rounded border px-1.5 py-0.5 text-xs bg-muted">→</kbd>
+              </div>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-muted-foreground">Próxima / Finalizar</span>
+              <kbd className="font-mono rounded border px-1.5 py-0.5 text-xs bg-muted">Enter</kbd>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {step === "finished" && (
+        <Card className="text-center">
+          <CardContent className="pt-8 space-y-6">
+            <CheckCircle2 className="mx-auto text-emerald-500" size={64} />
+            <div>
+              <h2 className="text-2xl font-bold">Recebido!</h2>
+              <p className="text-muted-foreground">Sua atividade foi enviada com sucesso.</p>
+            </div>
+            <Button className="w-full" onClick={() => navigate("/portal")}>Sair</Button>
+          </CardContent>
+        </Card>
+      )}
+      </div>
     </div>
   );
 }
+
