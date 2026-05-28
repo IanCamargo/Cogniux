@@ -193,8 +193,9 @@ export function ExamDetail() {
         </Button>
         <AlertDialog>
           <AlertDialogTrigger>
-            <Button variant="ghost" size="icon" aria-label="Excluir prova" className="text-destructive hover:text-destructive">
-              <Trash2 size={18} />
+            <Button variant="destructive" size="sm">
+              <Trash2 size={16} />
+              Remover
             </Button>
           </AlertDialogTrigger>
           <AlertDialogContent>
@@ -550,47 +551,43 @@ export function ExamDetail() {
             </TabsContent>
 
             <TabsContent value="plan" className="mt-6 space-y-6">
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between">
+              <div className="flex items-center justify-between">
+                <h3 className="font-medium flex items-center gap-2">
+                  <Sparkles size={18} /> Plano Pedagógico
+                </h3>
+                <Button onClick={handleGeneratePlan} disabled={generatingPlan || submissions.length === 0}>
+                  {generatingPlan ? (
+                    <Loader2 className="animate-spin mr-2" size={18} />
+                  ) : (
+                    <Wand2 className="mr-2" size={18} />
+                  )}
+                  Gerar Análise
+                </Button>
+              </div>
+              {pedagogicalPlan ? (
+                <div className="space-y-6">
                   <div>
-                    <CardTitle className="flex items-center gap-2">
-                      <Sparkles size={18} /> Plano Pedagógico
-                    </CardTitle>
+                    <h4 className="font-medium mb-2">Análise</h4>
+                    <p className="text-sm text-muted-foreground leading-relaxed">{pedagogicalPlan.analysis}</p>
                   </div>
-                  <Button onClick={handleGeneratePlan} disabled={generatingPlan || submissions.length === 0}>
-                    {generatingPlan ? (
-                      <Loader2 className="animate-spin mr-2" size={18} />
-                    ) : (
-                      <Wand2 className="mr-2" size={18} />
-                    )}
-                    Gerar Análise
-                  </Button>
-                </CardHeader>
-                {pedagogicalPlan ? (
-                  <CardContent className="space-y-6">
-                    <div>
-                      <h4 className="font-medium mb-2">Análise</h4>
-                      <p className="text-sm text-muted-foreground leading-relaxed">{pedagogicalPlan.analysis}</p>
-                    </div>
-                    <div>
-                      <h4 className="font-medium mb-3 flex items-center gap-2">
-                        <ListChecks size={16} /> Recomendações
-                      </h4>
-                      <ul className="space-y-2">
-                        {pedagogicalPlan.recommendations?.map((item, idx) => (
-                          <li key={idx} className="text-sm p-3 bg-muted rounded-lg">
-                            {item}
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  </CardContent>
-                ) : (
-                  <CardContent className="py-12 text-center text-muted-foreground">
-                    Nenhum plano gerado. Clique em &quot;Gerar Análise&quot; após receber submissões.
-                  </CardContent>
-                )}
-              </Card>
+                  <div>
+                    <h4 className="font-medium mb-3 flex items-center gap-2">
+                      <ListChecks size={16} /> Recomendações
+                    </h4>
+                    <ul className="space-y-2">
+                      {pedagogicalPlan.recommendations?.map((item, idx) => (
+                        <li key={idx} className="text-sm p-3 bg-muted rounded-lg">
+                          {item}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+              ) : (
+                <p className="py-12 text-center text-sm text-muted-foreground">
+                  Nenhum plano gerado. Clique em &quot;Gerar Análise&quot; após receber submissões.
+                </p>
+              )}
             </TabsContent>
 
           </Tabs>

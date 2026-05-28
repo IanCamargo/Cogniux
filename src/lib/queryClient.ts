@@ -1,5 +1,5 @@
 import { QueryClient } from "@tanstack/react-query";
-import { onAuthStateChanged, type User } from "firebase/auth";
+import { onAuthStateChanged, getRedirectResult, type User } from "firebase/auth";
 import { auth } from "@/lib/firebase";
 import { queryKeys } from "@/lib/queryKeys";
 
@@ -20,6 +20,9 @@ let lastExamsInvalidateUid: string | null = null;
 export function initAuthQuery(): void {
   if (authListenerStarted) return;
   authListenerStarted = true;
+
+  // Captura o resultado do signInWithRedirect após voltar do provider
+  void getRedirectResult(auth).catch(() => null);
 
   onAuthStateChanged(auth, (user) => {
     queryClient.setQueryData<AuthQueryData>(queryKeys.auth, { user, ready: true });

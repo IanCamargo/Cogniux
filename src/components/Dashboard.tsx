@@ -8,7 +8,6 @@ import {
   Edit2,
   Globe,
   MoreHorizontal,
-  ChevronDown,
 } from "lucide-react";
 import {
   BarChart,
@@ -165,7 +164,6 @@ export function Dashboard() {
   const dashboardStats = useMemo(() => calculateDashboardStats(exams, scores), [exams, scores]);
   const recentExams = useMemo(() => exams.slice(0, RECENT_EXAMS_LIMIT), [exams]);
   const [examToDelete, setExamToDelete] = useState<string | null>(null);
-  const [chartsOpen, setChartsOpen] = useState(true);
 
   const distribution  = useMemo(() => buildDistribution(scores), [scores]);
   const passFailData  = useMemo(() => buildPassFail(scores), [scores]);
@@ -227,20 +225,7 @@ export function Dashboard() {
 
       {/* ── Charts ── */}
       {hasStats && (
-        <>
-          <button
-            onClick={() => setChartsOpen((o) => !o)}
-            className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors select-none -mb-2"
-          >
-            <ChevronDown
-              size={16}
-              className={`transition-transform duration-200 ${chartsOpen ? "" : "-rotate-90"}`}
-            />
-            Estatísticas
-          </button>
-
-          {chartsOpen && (
-          <div className="grid sm:grid-cols-2 xl:grid-cols-4 gap-6 select-none">
+        <div className="grid sm:grid-cols-2 xl:grid-cols-4 gap-6 select-none">
 
           {/* 1. Distribuição de notas */}
           <div>
@@ -338,8 +323,6 @@ export function Dashboard() {
           )}
 
         </div>
-          )}
-        </>
       )}
 
       {/* ── Exam table ── */}

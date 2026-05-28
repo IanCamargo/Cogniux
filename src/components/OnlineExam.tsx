@@ -1,13 +1,24 @@
 import { useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { doc, collection, writeBatch, serverTimestamp } from "firebase/firestore";
-import { CheckCircle2, Loader2, ArrowRight, ArrowLeft, Send, BrainCircuit, AlertCircle, Sun, Moon } from "lucide-react";
+import { CheckCircle2, Loader2, ArrowRight, ArrowLeft, Send, BrainCircuit, AlertCircle, Sun, Moon, Maximize, Minimize, Info } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Progress } from "@/components/ui/progress";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { db } from "@/lib/firebase";
 import { calculateScore } from "@/lib/grading";
 import { useTheme } from "@/hooks/useTheme";
@@ -88,6 +99,8 @@ function OnlineExamContent({
   const [step, setStep] = useState<OnlineExamStep>(initialStep);
   const [currentQuestion, setCurrentQuestion] = useState(0);
   const [submitting, setSubmitting] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [, setFocusedOption] = useState<number | null>(null);
 
   const ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
 
@@ -129,21 +142,87 @@ function OnlineExamContent({
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (step !== "exam") return;
-    if (e.key === "ArrowRight" && currentQuestion < exam.numQuestions - 1) {
-      setCurrentQuestion((p) => p + 1);
-    }
-    if (e.key === "ArrowLeft" && currentQuestion > 0) {
-      setCurrentQuestion((p) => p - 1);
+
+    const numOptions = exam.alternativesPerQuestion;
+    const currentAnswerIdx = answers[currentQuestion]
+      ? ALPHABET.indexOf(answers[currentQuestion])
+      : -1;
+
+    switch (e.key) {
+      case "Tab":
+        e.preventDefault();
+        break;
+      case "ArrowRight":
+        if (currentQuestion < exam.numQuestions - 1) {
+          e.preventDefault();
+          setCurrentQuestion((p) => p + 1);
+          setFocusedOption(null);
+        }
+        break;
+      case "ArrowLeft":
+        if (currentQuestion > 0) {
+          e.preventDefault();
+          setCurrentQuestion((p) => p - 1);
+          setFocusedOption(null);
+        }
+        break;
+      case "ArrowDown": {
+        e.preventDefault();
+        const next = currentAnswerIdx < numOptions - 1 ? currentAnswerIdx + 1 : 0;
+        const newAns = [...answers];
+        newAns[currentQuestion] = ALPHABET[next];
+        setAnswers(newAns);
+        setFocusedOption(next);
+        break;
+      }
+      case "ArrowUp": {
+        e.preventDefault();
+        const prev = currentAnswerIdx > 0 ? currentAnswerIdx - 1 : numOptions - 1;
+        const newAns = [...answers];
+        newAns[currentQuestion] = ALPHABET[prev];
+        setAnswers(newAns);
+        setFocusedOption(prev);
+        break;
+      }
+      case "Enter":
+        e.preventDefault();
+        if (currentQuestion < exam.numQuestions - 1) {
+          setCurrentQuestion((p) => p + 1);
+        } else if (!answers.includes("")) {
+          setConfirmOpen(true);
+        }
+        break;
     }
   };
 
   const progress = (answers.filter(Boolean).length / exam.numQuestions) * 100;
 
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
+
+  const toggleFullscreen = () => {
+    if (!document.fullscreenElement) {
+      void document.documentElement.requestFullscreen();
+      setIsFullscreen(true);
+    } else {
+      void document.exitFullscreen();
+      setIsFullscreen(false);
+    }
+  };
+
   return (
-    <div className="min-h-screen bg-background" onKeyDown={handleKeyDown} tabIndex={0}>
-      <Button variant="outline" size="icon" className="fixed top-4 right-4 z-50" onClick={() => setTheme(theme === "dark" ? "light" : "dark")} aria-label="Alternar tema">
-        {theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}
-      </Button>
+    <div className="min-h-screen bg-background outline-none" onKeyDown={handleKeyDown} tabIndex={0}>
+      <div className="fixed top-4 right-4 z-50 flex flex-col gap-2">
+        <Button variant="outline" size="icon" onClick={toggleFullscreen} aria-label="Tela cheia">
+          {isFullscreen ? <Minimize size={18} /> : <Maximize size={18} />}
+        </Button>
+        <Button variant="outline" size="icon" onClick={() => setTheme(theme === "dark" ? "light" : "dark")} aria-label="Alternar tema">
+          {theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}
+        </Button>
+        <Button variant="outline" size="icon" onClick={() => setShortcutsOpen(true)} aria-label="Atalhos de teclado">
+          <Info size={18} />
+        </Button>
+      </div>
 
       <div className="container max-w-3xl py-16 md:py-8">
       {step === "name" && (
@@ -174,8 +253,8 @@ function OnlineExamContent({
 
       {step === "exam" && (
         <Card>
-          <CardHeader className="border-b">
-            <div className="flex justify-between items-start">
+          <CardHeader className="pb-0">
+            <div className="flex justify-between items-start mb-4">
               <div>
                 <CardTitle>{exam.subject}</CardTitle>
                 <CardDescription>{exam.course ?? "Avaliação Online"}</CardDescription>
@@ -185,16 +264,16 @@ function OnlineExamContent({
                 <p className="font-medium">{studentName}</p>
               </div>
             </div>
-            <Progress value={progress} className="mt-4" />
+            <Progress value={progress} className="rounded-none" />
           </CardHeader>
           <CardContent className="pt-6 space-y-6">
-            <div className="flex gap-1 overflow-x-auto pb-2">
+            <div className="grid gap-1" style={{ gridTemplateColumns: `repeat(${exam.numQuestions}, 1fr)` }}>
               {Array.from({ length: exam.numQuestions }).map((_, i) => (
                 <Button
                   key={i}
                   size="sm"
                   variant={currentQuestion === i ? "default" : answers[i] ? "secondary" : "outline"}
-                  className="w-9 h-9 p-0 shrink-0"
+                  className="h-9 p-0 w-full"
                   onClick={() => setCurrentQuestion(i)}
                   aria-label={`Questão ${i + 1}`}
                 >
@@ -204,7 +283,6 @@ function OnlineExamContent({
             </div>
 
             <div className="space-y-4">
-              <BadgeQuestion num={currentQuestion + 1} />
               <p className="text-lg font-medium leading-relaxed">
                 {exam.questions?.[currentQuestion]?.text ?? "Marque a alternativa correta:"}
               </p>
@@ -218,12 +296,11 @@ function OnlineExamContent({
                       const newAns = [...answers];
                       newAns[currentQuestion] = letter;
                       setAnswers(newAns);
+                      setFocusedOption(idx);
                     }}
                   >
-                    <span className="w-8 h-8 rounded-md bg-muted flex items-center justify-center mr-3 font-bold shrink-0">
-                      {letter}
-                    </span>
-                    {exam.questions?.[currentQuestion]?.options?.[idx] ?? `Alternativa ${letter}`}
+                    <span className="font-bold mr-2 shrink-0">{letter})</span>
+                    <span className="whitespace-normal break-words text-left">{exam.questions?.[currentQuestion]?.options?.[idx]}</span>
                   </Button>
                 ))}
               </div>
@@ -238,8 +315,8 @@ function OnlineExamContent({
                   Próxima <ArrowRight className="ml-2" size={18} />
                 </Button>
               ) : (
-                <Button className="flex-1" disabled={submitting || answers.includes("")} onClick={handleSubmit}>
-                  {submitting ? <Loader2 className="animate-spin mr-2" /> : <Send className="mr-2" size={18} />}
+                <Button className="flex-1" disabled={submitting || answers.includes("")} onClick={() => setConfirmOpen(true)}>
+                  <Send className="mr-2" size={18} />
                   Finalizar
                 </Button>
               )}
@@ -247,6 +324,52 @@ function OnlineExamContent({
           </CardContent>
         </Card>
       )}
+
+      <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Enviar respostas?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {answers.filter(Boolean).length} de {exam?.numQuestions} questões respondidas. Após o envio não será possível alterar.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={submitting}>Voltar</AlertDialogCancel>
+            <AlertDialogAction disabled={submitting} onClick={() => void handleSubmit()}>
+              {submitting ? <Loader2 className="animate-spin mr-2" size={16} /> : null}
+              Confirmar envio
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <Dialog open={shortcutsOpen} onOpenChange={setShortcutsOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Atalhos de Teclado</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 text-sm">
+            <div className="flex items-center justify-between">
+              <span className="text-muted-foreground">Selecionar alternativa</span>
+              <div className="flex gap-1">
+                <kbd className="font-mono rounded border px-1.5 py-0.5 text-xs bg-muted">↑</kbd>
+                <kbd className="font-mono rounded border px-1.5 py-0.5 text-xs bg-muted">↓</kbd>
+              </div>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-muted-foreground">Navegar entre questões</span>
+              <div className="flex gap-1">
+                <kbd className="font-mono rounded border px-1.5 py-0.5 text-xs bg-muted">←</kbd>
+                <kbd className="font-mono rounded border px-1.5 py-0.5 text-xs bg-muted">→</kbd>
+              </div>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-muted-foreground">Próxima / Finalizar</span>
+              <kbd className="font-mono rounded border px-1.5 py-0.5 text-xs bg-muted">Enter</kbd>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {step === "finished" && (
         <Card className="text-center">
@@ -265,10 +388,3 @@ function OnlineExamContent({
   );
 }
 
-function BadgeQuestion({ num }: { num: number }) {
-  return (
-    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-secondary text-secondary-foreground">
-      Questão {num}
-    </span>
-  );
-}

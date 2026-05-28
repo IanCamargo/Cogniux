@@ -1,6 +1,6 @@
 import { useCallback } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { GoogleAuthProvider, signInWithPopup } from "firebase/auth";
+import { GoogleAuthProvider, GithubAuthProvider, signInWithPopup, signInWithRedirect, signInAnonymously } from "firebase/auth";
 import { auth } from "@/lib/firebase";
 import { type AuthQueryData } from "@/lib/queryClient";
 import { queryKeys } from "@/lib/queryKeys";
@@ -20,9 +20,17 @@ export function useAuth() {
     await signInWithPopup(auth, new GoogleAuthProvider());
   }, []);
 
+  const loginWithGithub = useCallback(async () => {
+    await signInWithRedirect(auth, new GithubAuthProvider());
+  }, []);
+
+  const loginAnonymously = useCallback(async () => {
+    await signInAnonymously(auth);
+  }, []);
+
   const logout = useCallback(async () => {
     await auth.signOut();
   }, []);
 
-  return { user: user ?? null, loading, login, logout };
+  return { user: user ?? null, loading, login, loginWithGithub, loginAnonymously, logout };
 }

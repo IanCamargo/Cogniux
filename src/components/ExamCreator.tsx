@@ -12,7 +12,6 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
@@ -35,7 +34,7 @@ import { getFirestoreErrorMessage, stripUndefined } from "@/lib/firestorePayload
 import { queryClient } from "@/lib/queryClient";
 import { queryKeys } from "@/lib/queryKeys";
 import { useFirestoreDocQuery } from "@/hooks/firestore/useFirestoreDocQuery";
-import { generateExamQuestions, generateAnswerKey } from "@/services/geminiService";
+import { generateExamQuestions } from "@/services/geminiService";
 import type { Exam, GeneratedQuestion } from "@/types";
 import { toast } from "sonner";
 
@@ -57,33 +56,23 @@ const step1Schema = z.object({
   isOnline: z.boolean(),
 });
 
-const aiGenerationSchema = step1Schema.extend({
+const step1SchemaWithTopic = step1Schema.extend({
+  topic: z.string(),
+});
+
+const aiGenerationSchema = step1SchemaWithTopic.extend({
   topic: z.string().trim().min(1, "Tópico é obrigatório para gerar com IA."),
 });
 
-interface Step1FormValues {
-  subject: string;
-  semester: string;
-  course: string;
-  className: string;
-  unit: string;
-  numQuestions: number;
-  alternativesPerQuestion: number;
-  isOnline: boolean;
-}
+type Step1FormValues = z.infer<typeof step1SchemaWithTopic>;
 
 function applyZodErrors(
   error: z.ZodError,
-  setFieldError: (name: keyof Step1FormValues, message: string) => void,
-  onTopicError?: (message: string) => void
+  setFieldError: (name: keyof Step1FormValues, message: string) => void
 ) {
   error.issues.forEach((issue) => {
     const field = issue.path[0];
-    if (field === "topic") {
-      onTopicError?.(issue.message);
-      return;
-    }
-    if (typeof field === "string" && field in step1Schema.shape) {
+    if (typeof field === "string") {
       setFieldError(field as keyof Step1FormValues, issue.message);
     }
   });
@@ -153,6 +142,7 @@ const defaultFormValues: Step1FormValues = {
   numQuestions: 10,
   alternativesPerQuestion: 5,
   isOnline: true,
+  topic: "",
 };
 
 interface ExamCreatorProps {
@@ -193,7 +183,7 @@ function ExamEditForm({
   const [loading, setLoading] = useState(false);
 
   const form = useForm<Step1FormValues>({
-    resolver: zodResolver(step1Schema),
+    resolver: zodResolver(step1SchemaWithTopic),
     defaultValues: existingExam
       ? {
           subject: existingExam.subject,
@@ -204,15 +194,17 @@ function ExamEditForm({
           numQuestions: existingExam.numQuestions,
           alternativesPerQuestion: existingExam.alternativesPerQuestion,
           isOnline: existingExam.isOnline,
+          topic: "",
         }
       : defaultFormValues,
   });
 
   const handleSave = form.handleSubmit(async (data) => {
     setLoading(true);
+    const { topic: _, ...examData } = data;
     try {
       await updateDoc(doc(db, "exams", editId), {
-        ...stripUndefined(data),
+        ...stripUndefined(examData),
         updatedAt: serverTimestamp(),
       });
       void queryClient.invalidateQueries({ queryKey: queryKeys.exam(editId), refetchType: "none" });
@@ -338,18 +330,15 @@ function ExamCreatorForm({
 }) {
   const navigate = useNavigate();
   const [step, setStep] = useState(1);
-  const [generationMode, setGenerationMode] = useState<"full" | "key">("full");
   const [questions, setQuestions] = useState<GeneratedQuestion[]>(existingExam?.questions ?? []);
   const [answerKey, setAnswerKey] = useState<string[]>(existingExam?.answerKey ?? []);
   const [loading, setLoading] = useState(false);
   const [aiGenerating, setAiGenerating] = useState(false);
   const [hasGeneratedWithAI, setHasGeneratedWithAI] = useState((existingExam?.answerKey?.length ?? 0) > 0);
-  const [topic, setTopic] = useState("");
-  const [topicError, setTopicError] = useState<string | null>(null);
   const [contextFiles, setContextFiles] = useState<{ name: string; data: string; mimeType: string }[]>([]);
 
   const form = useForm<Step1FormValues>({
-    resolver: zodResolver(step1Schema),
+    resolver: zodResolver(step1SchemaWithTopic),
     defaultValues: existingExam
       ? {
           subject: existingExam.subject,
@@ -360,6 +349,7 @@ function ExamCreatorForm({
           numQuestions: existingExam.numQuestions,
           alternativesPerQuestion: existingExam.alternativesPerQuestion,
           isOnline: existingExam.isOnline,
+          topic: "",
         }
       : defaultFormValues,
   });
@@ -381,18 +371,17 @@ function ExamCreatorForm({
 
   const handleNext = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    setTopicError(null);
     form.clearErrors();
 
-    const validation = aiGenerationSchema.safeParse({ ...form.getValues(), topic });
+    const validation = aiGenerationSchema.safeParse(form.getValues());
     if (!validation.success) {
-      applyZodErrors(validation.error, (name, message) => form.setError(name, { message }), setTopicError);
+      applyZodErrors(validation.error, (name, message) => form.setError(name, { message }));
       toast.error("Preencha os campos obrigatórios.");
       return;
     }
 
     if (!hasGeneratedWithAI) {
-      setTopicError("Gere a prova com IA antes de continuar.");
+      form.setError("topic", { message: "Gere a prova com IA antes de continuar." });
       toast.error("Gere a prova com IA antes de continuar.");
       return;
     }
@@ -407,12 +396,11 @@ function ExamCreatorForm({
   };
 
   const handleGenerateAI = async () => {
-    setTopicError(null);
     form.clearErrors();
 
-    const validation = aiGenerationSchema.safeParse({ ...form.getValues(), topic });
+    const validation = aiGenerationSchema.safeParse(form.getValues());
     if (!validation.success) {
-      applyZodErrors(validation.error, (name, message) => form.setError(name, { message }), setTopicError);
+      applyZodErrors(validation.error, (name, message) => form.setError(name, { message }));
       toast.error("Corrija os campos antes de gerar.");
       return;
     }
@@ -421,21 +409,15 @@ function ExamCreatorForm({
     setAiGenerating(true);
     try {
       const filesForAI = contextFiles.map((f) => ({ data: f.data, mimeType: f.mimeType }));
-      if (generationMode === "full") {
-        const generated = await generateExamQuestions(
-          subject,
-          validatedTopic,
-          numQuestions,
-          "intermediate",
-          filesForAI
-        );
-        setQuestions(generated);
-        setAnswerKey(generated.map((q) => q.correctAnswer));
-      } else {
-        const key = await generateAnswerKey(subject, validatedTopic, numQuestions, filesForAI);
-        setAnswerKey(key);
-        setQuestions([]);
-      }
+      const generated = await generateExamQuestions(
+        subject,
+        validatedTopic,
+        numQuestions,
+        "intermediate",
+        filesForAI
+      );
+      setQuestions(generated);
+      setAnswerKey(generated.map((q) => q.correctAnswer));
       setHasGeneratedWithAI(true);
       toast.success("Conteúdo gerado com sucesso!");
     } catch {
@@ -665,22 +647,6 @@ function ExamCreatorForm({
                   </div>
                   <div className="space-y-2">
                     <LabelWithTooltip
-                      label="Modo de geração"
-                      tooltip="Prova Completa cria enunciados, alternativas e gabarito. Apenas Gabarito gera somente as letras corretas para você montar as questões manualmente."
-                    />
-                    <Tabs value={generationMode} onValueChange={(v) => setGenerationMode(v as "full" | "key")}>
-                      <TabsList className="w-full">
-                        <TabsTrigger value="full" className="flex-1">
-                          Prova Completa
-                        </TabsTrigger>
-                        <TabsTrigger value="key" className="flex-1">
-                          Apenas Gabarito
-                        </TabsTrigger>
-                      </TabsList>
-                    </Tabs>
-                  </div>
-                  <div className="space-y-2">
-                    <LabelWithTooltip
                       label="Anexos (PDF, imagens)"
                       tooltip="Opcional. A IA usa esses arquivos como referência para criar questões ou gabarito alinhados ao seu material."
                     />
@@ -715,15 +681,13 @@ function ExamCreatorForm({
                     />
                     <Textarea
                       id="topic"
-                      value={topic}
-                      onChange={(e) => {
-                        setTopic(e.target.value);
-                        if (topicError) setTopicError(null);
-                      }}
                       rows={3}
-                      aria-invalid={!!topicError}
+                      aria-invalid={!!form.formState.errors.topic}
+                      {...form.register("topic")}
                     />
-                    {topicError && <p className="text-sm text-destructive">{topicError}</p>}
+                    {form.formState.errors.topic && (
+                      <p className="text-sm text-destructive">{form.formState.errors.topic.message}</p>
+                    )}
                   </div>
                   <Button
                     type="button"
@@ -817,8 +781,8 @@ function ExamCreatorForm({
                             <div key={letter} className="flex items-start gap-3 py-1">
                               <RadioGroupItem value={letter} id={optionId} className="mt-0.5" />
                               <Label htmlFor={optionId} className="flex-1 cursor-pointer font-normal leading-snug">
-                                <span className="font-medium">{letter}</span>
-                                {optionText ? <span className="text-muted-foreground"> — {optionText}</span> : null}
+                                <span className="font-medium">{letter})</span>
+                                {optionText ? <span className="text-muted-foreground"> {optionText.replace(/^[a-zA-Z]\s*[-–)\.]\s*/, "")}</span> : null}
                               </Label>
                             </div>
                           );

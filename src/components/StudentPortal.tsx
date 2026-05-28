@@ -1,10 +1,11 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { BrainCircuit, ArrowRight, Sun, Moon, LogIn } from "lucide-react";
+import { BrainCircuit, ArrowRight, Sun, Moon } from "lucide-react";
+import { GoogleIcon, GithubIcon } from "@/components/icons/BrandIcons";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { useAuth } from "@/hooks/useAuth";
 import { useTheme } from "@/hooks/useTheme";
@@ -17,7 +18,7 @@ export function StudentPortal() {
   const [code, setCode] = useState("");
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
-  const { login } = useAuth();
+  const { login, loginWithGithub, loginAnonymously } = useAuth();
   const { theme, setTheme } = useTheme();
 
   const handleEnterExam = async () => {
@@ -53,6 +54,24 @@ export function StudentPortal() {
     }
   };
 
+  const handleAnonymousLogin = async () => {
+    try {
+      await loginAnonymously();
+      navigate("/dashboard");
+    } catch {
+      toast.error("Falha na autenticação anônima.");
+    }
+  };
+
+  const handleGithubLogin = async () => {
+    try {
+      await loginWithGithub();
+      navigate("/dashboard");
+    } catch {
+      toast.error("Falha na autenticação com GitHub.");
+    }
+  };
+
   return (
     <div className="min-h-screen bg-background flex flex-col items-center justify-center relative">
       <Button
@@ -77,17 +96,13 @@ export function StudentPortal() {
         </div>
 
         <Card>
-          <CardHeader>
-            <CardTitle>Acesso do Aluno</CardTitle>
-            <CardDescription>Insira o código da atividade fornecido pelo professor.</CardDescription>
-          </CardHeader>
           <CardContent className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="exam-code">Código da Atividade</Label>
               <Input
                 id="exam-code"
                 placeholder="Cole o código aqui..."
-                className="text-center text-lg font-mono"
+                className=""
                 value={code}
                 onChange={(e) => setCode(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && code.trim() && handleEnterExam()}
@@ -104,12 +119,21 @@ export function StudentPortal() {
 
             <Separator />
 
-            <p className="text-xs text-muted-foreground text-center uppercase tracking-widest font-medium">
+            <p className="text-xs text-muted-foreground uppercase tracking-widest font-medium">
               Acesso do Professor
             </p>
-            <Button variant="outline" className="w-full" onClick={handleProfessorLogin}>
-              <LogIn className="mr-2" size={16} />
-              Entrar com Google
+            <div className="grid grid-cols-2 gap-2">
+              <Button variant="outline" className="w-full" onClick={handleProfessorLogin}>
+                <GoogleIcon className="mr-2 w-4 h-4" />
+                Google
+              </Button>
+              <Button variant="outline" className="w-full" onClick={handleGithubLogin}>
+                <GithubIcon className="mr-2 w-4 h-4 text-foreground" />
+                GitHub
+              </Button>
+            </div>
+            <Button variant="ghost" className="w-full text-muted-foreground" onClick={handleAnonymousLogin}>
+              Continuar sem conta
             </Button>
           </CardContent>
         </Card>
